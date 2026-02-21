@@ -11,6 +11,14 @@ if (!app.isPackaged) {
 process.stdout?.on?.('error', () => { });
 process.stderr?.on?.('error', () => { });
 
+process.on('uncaughtException', (err) => {
+  logToFile('[CRITICAL] Uncaught Exception: ' + (err.stack || err.message || err));
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logToFile('[CRITICAL] Unhandled Rejection at: ' + promise + ' reason: ' + (reason instanceof Error ? reason.stack : reason));
+});
+
 const logFile = path.join(app.getPath('documents'), 'natively_debug.log');
 
 const originalLog = console.log;
@@ -1557,8 +1565,6 @@ async function initializeApp() {
     }
 
     console.log("App is ready")
-
-    appState.createWindow()
 
     appState.createWindow()
 

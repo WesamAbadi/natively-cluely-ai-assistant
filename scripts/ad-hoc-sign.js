@@ -75,25 +75,24 @@ exports.default = async function (context) {
     const appPath = path.join(appOutDir, `${appName}.app`);
 
     // ── Step 1: Rename helper executables (before signing) ──
+    // DISABLED: Renaming the bundle prevents Electron from spawning the Renderer and GPU processes,
+    // resulting in an immediate silent crash. We now rely solely on `process.title` in `main.ts` for disguise.
     try {
-        renameHelpers(appOutDir, appName);
+        // renameHelpers(appOutDir, appName);
     } catch (error) {
         console.error('[Helper Rename] Failed to rename helpers:', error);
         // Non-fatal: continue to signing
     }
 
     // ── Step 2: Ad-hoc sign the application ──
-    // Resolve the path to the entitlements file so V8 gets JIT memory permissions
-    const entitlementsPath = path.join(context.packager.info.projectDir, 'assets', 'entitlements.mac.plist');
-    console.log(`[Ad-Hoc Signing] Signing ${appPath} with entitlements from ${entitlementsPath}...`);
+    console.log(`[Ad-Hoc Signing] Signing ${appPath}...`);
 
     try {
         // --force: replace existing signature
         // --deep: sign nested code
-        // --entitlements: attach JIT/memory entitlements (critical for Intel Macs)
         // --sign -: ad-hoc signature
-        execSync(`codesign --force --deep --entitlements "${entitlementsPath}" --sign - "${appPath}"`, { stdio: 'inherit' });
-        console.log('[Ad-Hoc Signing] Successfully signed the application with entitlements.');
+        execSync(`codesign --force --deep --sign - "${appPath}"`, { stdio: 'inherit' });
+        console.log('[Ad-Hoc Signing] Successfully signed the application.');
     } catch (error) {
         console.error('[Ad-Hoc Signing] Failed to sign the application:', error);
         throw error;
