@@ -18,9 +18,7 @@ pub use macos::list_output_devices;
 #[cfg(target_os = "windows")]
 pub mod windows;
 #[cfg(target_os = "windows")]
-pub use windows::SpeakerInput;
-#[cfg(target_os = "windows")]
-pub use windows::list_output_devices;
+pub use windows::{SpeakerInput, SpeakerStream, list_output_devices};
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub mod fallback {
