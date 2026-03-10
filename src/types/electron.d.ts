@@ -1,3 +1,34 @@
+type ContextParseStatus = 'processing' | 'ready' | 'gemini-only' | 'error'
+type ContextGeminiStatus = 'pending' | 'uploading' | 'synced' | 'expired' | 'error'
+
+export interface ContextFileRecord {
+  id: string
+  name: string
+  mimeType: string
+  sizeBytes: number
+  enabled: boolean
+  parseStatus: ContextParseStatus
+  parseError?: string
+  extractedChars: number
+  geminiStatus: ContextGeminiStatus
+  geminiError?: string
+  geminiExpiresAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ContextBaseConfig {
+  enabled: boolean
+  manualText: string
+  files: ContextFileRecord[]
+  updatedAt: number
+}
+
+export interface ContextInjectionResult {
+  contextBlock?: string
+  geminiFileParts: Array<{ fileId: string; name: string; uri: string; mimeType: string }>
+}
+
 export interface ElectronAPI {
   updateContentDimensions: (dimensions: {
     width: number
@@ -237,6 +268,16 @@ export interface ElectronAPI {
   profileDelete: () => Promise<{ success: boolean; error?: string }>
   profileGetProfile: () => Promise<any>
   profileSelectFile: () => Promise<{ success?: boolean; cancelled?: boolean; filePath?: string; error?: string }>
+
+  // Context Base API
+  contextGetConfig: () => Promise<ContextBaseConfig>
+  contextSetEnabled: (enabled: boolean) => Promise<ContextBaseConfig>
+  contextUpdateText: (text: string) => Promise<ContextBaseConfig>
+  contextSelectFiles: () => Promise<{ cancelled?: boolean; paths?: string[]; error?: string }>
+  contextAddFiles: (paths: string[]) => Promise<{ results: Array<{ filePath: string; success: boolean; fileId?: string; error?: string }>; config: ContextBaseConfig }>
+  contextRemoveFile: (fileId: string) => Promise<ContextBaseConfig>
+  contextToggleFile: (fileId: string, enabled: boolean) => Promise<ContextBaseConfig>
+  contextRefreshGeminiSync: () => Promise<ContextBaseConfig>
 
   // JD & Research API
   profileUploadJD: (filePath: string) => Promise<{ success: boolean; error?: string }>

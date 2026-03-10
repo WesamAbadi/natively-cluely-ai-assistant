@@ -18,6 +18,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
 import { createProviderRateLimiters, RateLimiter } from './services/RateLimiter';
+import { ContextBaseManager, ContextInjectionFilePart } from "./services/ContextBaseManager";
 const execAsync = promisify(exec);
 
 interface OllamaResponse {
@@ -28,6 +29,8 @@ interface OllamaResponse {
 // Model constant for Gemini 3 Flash
 const GEMINI_FLASH_MODEL = "gemini-3-flash-preview"
 const GEMINI_PRO_MODEL = "gemini-3-pro-preview"
+const GEMINI_FLASH_LITE_MODEL = "gemini-3.1-flash-lite-preview-06-17"
+const GEMINI_FLASH_LITE_CANONICAL_MODEL = "gemini-3.1-flash-lite-preview"
 const GROQ_MODEL = "llama-3.3-70b-versatile"
 const OPENAI_MODEL = "gpt-5.2-chat-latest"
 const CLAUDE_MODEL = "claude-sonnet-4-5"
@@ -55,6 +58,8 @@ export class LLMHelper {
   private knowledgeOrchestrator: any = null;
   private aiResponseLanguage: string = 'English';
   private sttLanguage: string = 'english-us';
+  private contextBaseManager: ContextBaseManager | null = null;
+  private createPartFromUriFn: ((uri: string, mimeType: string) => any) | null | undefined = undefined;
 
   // Rate limiters per provider to prevent 429 errors on free tiers
   private rateLimiters: ReturnType<typeof createProviderRateLimiters>;
@@ -168,6 +173,7 @@ export class LLMHelper {
     let targetModelId = modelId;
     if (modelId === 'gemini') targetModelId = GEMINI_FLASH_MODEL;
     if (modelId === 'gemini-pro') targetModelId = GEMINI_PRO_MODEL;
+    if (modelId === 'gemini-lite') targetModelId = GEMINI_FLASH_LITE_MODEL;
     if (modelId === 'gpt-4o') targetModelId = OPENAI_MODEL;
     if (modelId === 'claude') targetModelId = CLAUDE_MODEL;
     if (modelId === 'llama') targetModelId = GROQ_MODEL;
@@ -199,6 +205,9 @@ export class LLMHelper {
     // Update specific model props if needed
     if (targetModelId === GEMINI_PRO_MODEL) this.geminiModel = GEMINI_PRO_MODEL;
     if (targetModelId === GEMINI_FLASH_MODEL) this.geminiModel = GEMINI_FLASH_MODEL;
+    if (targetModelId === GEMINI_FLASH_LITE_MODEL || targetModelId === GEMINI_FLASH_LITE_CANONICAL_MODEL) {
+      this.geminiModel = GEMINI_FLASH_LITE_CANONICAL_MODEL;
+    }
 
     console.log(`[LLMHelper] Switched to Cloud Model: ${targetModelId}`);
   }
@@ -673,8 +682,96 @@ ANSWER DIRECTLY:`;
     console.log('[LLMHelper] KnowledgeOrchestrator attached');
   }
 
+  public setContextBaseManager(manager: ContextBaseManager | null): void {
+    this.contextBaseManager = manager;
+    if (manager) {
+      console.log('[LLMHelper] ContextBaseManager attached');
+    }
+  }
+
   public getKnowledgeOrchestrator(): any {
     return this.knowledgeOrchestrator;
+  }
+
+  private normalizeGeminiModelId(modelId: string): string {
+    if (modelId === GEMINI_FLASH_LITE_MODEL) return GEMINI_FLASH_LITE_CANONICAL_MODEL;
+    return modelId;
+  }
+
+  private shouldIncludeGeminiFiles(isMultimodal: boolean): boolean {
+    if (!this.client) return false;
+    if (this.useOllama || this.customProvider || this.activeCurlProvider) return false;
+    if (this.currentModelId === OPENAI_MODEL || this.currentModelId === CLAUDE_MODEL) return false;
+    if (this.currentModelId === GROQ_MODEL && !isMultimodal) return false;
+    return true;
+  }
+
+  private shouldRetryWithoutGeminiFiles(error: any, fileParts: ContextInjectionFilePart[]): boolean {
+    if (!fileParts || fileParts.length === 0) return false;
+    const message = `${error?.message || ''} ${error?.stack || ''}`.toLowerCase();
+    if (!message) return false;
+
+    const hasFileSignal = /file|uri|filedata|createpartfromuri|active state|invalid argument|not found|expired|deleted|unavailable|stale/.test(message);
+    return hasFileSignal;
+  }
+
+  private async handleGeminiFileReferenceFailure(fileParts: ContextInjectionFilePart[], error: any): Promise<void> {
+    if (!this.contextBaseManager || !fileParts || fileParts.length === 0) return;
+    try {
+      await this.contextBaseManager.markGeminiPartsStale(
+        fileParts.map((p) => p.fileId),
+        error?.message || 'Gemini file reference failed'
+      );
+    } catch (markError: any) {
+      console.warn('[LLMHelper] Failed to mark Gemini files stale:', markError?.message || markError);
+    }
+  }
+
+  private getCreatePartFromUriHelper(): ((uri: string, mimeType: string) => any) | null {
+    if (this.createPartFromUriFn !== undefined) {
+      return this.createPartFromUriFn;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('@google/genai');
+      this.createPartFromUriFn = typeof mod?.createPartFromUri === 'function' ? mod.createPartFromUri : null;
+    } catch {
+      this.createPartFromUriFn = null;
+    }
+    return this.createPartFromUriFn;
+  }
+
+  private toGeminiFilePart(filePart: ContextInjectionFilePart): any {
+    const helper = this.getCreatePartFromUriHelper();
+    if (helper) {
+      return helper(filePart.uri, filePart.mimeType);
+    }
+    return {
+      fileData: {
+        fileUri: filePart.uri,
+        mimeType: filePart.mimeType,
+      },
+    };
+  }
+
+  private async buildGeminiContents(fullMessage: string, imagePath?: string, geminiFileParts: ContextInjectionFilePart[] = []): Promise<any[]> {
+    const contents: any[] = [{ text: fullMessage }];
+
+    if (imagePath) {
+      const imageData = await fs.promises.readFile(imagePath);
+      contents.push({
+        inlineData: {
+          mimeType: "image/png",
+          data: imageData.toString("base64")
+        }
+      });
+    }
+
+    for (const filePart of geminiFileParts) {
+      contents.push(this.toGeminiFilePart(filePart));
+    }
+
+    return contents;
   }
 
   public setAiResponseLanguage(language: string) {
@@ -733,6 +830,23 @@ ANSWER DIRECTLY:`;
       }
 
       const isMultimodal = !!imagePath;
+      let geminiFileParts: ContextInjectionFilePart[] = [];
+
+      if (this.contextBaseManager) {
+        try {
+          const contextInjection = await this.contextBaseManager.buildInjection(message, {
+            includeGeminiFiles: this.shouldIncludeGeminiFiles(isMultimodal),
+          });
+          if (contextInjection.contextBlock) {
+            context = context
+              ? `${contextInjection.contextBlock}\n\n${context}`
+              : contextInjection.contextBlock;
+          }
+          geminiFileParts = contextInjection.geminiFileParts || [];
+        } catch (contextError: any) {
+          console.warn('[LLMHelper] Context Base injection failed (non-stream):', contextError?.message || contextError);
+        }
+      }
 
       // Helper to build combined prompts for Groq/Gemini
       const buildMessage = (systemPrompt: string) => {
@@ -821,7 +935,7 @@ ANSWER DIRECTLY:`;
       if (isMultimodal) {
         // MULTIMODAL: Only vision-capable providers (NO Groq)
         if (this.client) {
-          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini, imagePath) });
+          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini, imagePath, geminiFileParts) });
         }
         if (this.openaiClient) {
           providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.generateWithOpenai(userContent, openaiSystemPrompt, imagePath) });
@@ -836,7 +950,7 @@ ANSWER DIRECTLY:`;
               const orig = this.geminiModel;
               this.geminiModel = GEMINI_PRO_MODEL;
               try {
-                const r = await this.tryGenerateResponse(combinedMessages.gemini, imagePath);
+                const r = await this.tryGenerateResponse(combinedMessages.gemini, imagePath, geminiFileParts);
                 this.geminiModel = orig;
                 return r;
               } catch (e) {
@@ -852,14 +966,14 @@ ANSWER DIRECTLY:`;
           providers.push({ name: `Groq (${GROQ_MODEL})`, execute: () => this.generateWithGroq(combinedMessages.groq) });
         }
         if (this.client) {
-          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini) });
+          providers.push({ name: `Gemini Flash`, execute: () => this.tryGenerateResponse(combinedMessages.gemini, undefined, geminiFileParts) });
           providers.push({
             name: `Gemini Pro`,
             execute: async () => {
               const orig = this.geminiModel;
               this.geminiModel = GEMINI_PRO_MODEL;
               try {
-                const r = await this.tryGenerateResponse(combinedMessages.gemini);
+                const r = await this.tryGenerateResponse(combinedMessages.gemini, undefined, geminiFileParts);
                 this.geminiModel = orig;
                 return r;
               } catch (e) {
@@ -1177,39 +1291,48 @@ ANSWER DIRECTLY:`;
     return prompt;
   }
 
-  private async tryGenerateResponse(fullMessage: string, imagePath?: string): Promise<string> {
-    let rawResponse: string;
+  private async tryGenerateResponse(
+    fullMessage: string,
+    imagePath?: string,
+    geminiFileParts: ContextInjectionFilePart[] = []
+  ): Promise<string> {
+    const execute = async (effectiveGeminiFileParts: ContextInjectionFilePart[]): Promise<string> => {
+      let rawResponse: string;
 
-    if (imagePath) {
-      const imageData = await fs.promises.readFile(imagePath);
-      const contents = [
-        { text: fullMessage },
-        {
-          inlineData: {
-            mimeType: "image/png",
-            data: imageData.toString("base64")
-          }
+      if (imagePath) {
+        const contents = await this.buildGeminiContents(fullMessage, imagePath, effectiveGeminiFileParts);
+
+        // Use current model for multimodal (allows Pro fallback)
+        if (this.client) {
+          rawResponse = await this.generateContent(contents);
+        } else {
+          throw new Error("No LLM provider configured");
         }
-      ];
+      } else {
+        // Text-only chat
+        if (this.useOllama) {
+          rawResponse = await this.callOllama(fullMessage);
+        } else if (this.client) {
+          const contents = await this.buildGeminiContents(fullMessage, undefined, effectiveGeminiFileParts);
+          rawResponse = await this.generateContent(contents);
+        } else {
+          throw new Error("No LLM provider configured");
+        }
+      }
 
-      // Use current model for multimodal (allows Pro fallback)
-      if (this.client) {
-        rawResponse = await this.generateContent(contents);
-      } else {
-        throw new Error("No LLM provider configured");
+      return rawResponse || "";
+    };
+
+    try {
+      return await execute(geminiFileParts);
+    } catch (error: any) {
+      if (!this.shouldRetryWithoutGeminiFiles(error, geminiFileParts)) {
+        throw error;
       }
-    } else {
-      // Text-only chat
-      if (this.useOllama) {
-        rawResponse = await this.callOllama(fullMessage);
-      } else if (this.client) {
-        rawResponse = await this.generateContent([{ text: fullMessage }])
-      } else {
-        throw new Error("No LLM provider configured");
-      }
+      console.warn('[LLMHelper] Gemini file context failed; retrying without file parts.');
+      await this.handleGeminiFileReferenceFailure(geminiFileParts, error);
+      return execute([]);
     }
-
-    return rawResponse || "";
   }
 
 
@@ -1230,6 +1353,23 @@ ANSWER DIRECTLY:`;
     console.log(`[LLMHelper] streamChatWithGemini called with message:`, message.substring(0, 50));
 
     const isMultimodal = !!imagePath;
+    let geminiFileParts: ContextInjectionFilePart[] = [];
+
+    if (this.contextBaseManager) {
+      try {
+        const contextInjection = await this.contextBaseManager.buildInjection(message, {
+          includeGeminiFiles: this.shouldIncludeGeminiFiles(isMultimodal),
+        });
+        if (contextInjection.contextBlock) {
+          context = context
+            ? `${contextInjection.contextBlock}\n\n${context}`
+            : contextInjection.contextBlock;
+        }
+        geminiFileParts = contextInjection.geminiFileParts || [];
+      } catch (contextError: any) {
+        console.warn('[LLMHelper] Context Base injection failed (streamChatWithGemini):', contextError?.message || contextError);
+      }
+    }
 
     // Build single-string messages for Groq/Gemini (which use combined prompts)
     const buildCombinedMessage = (systemPrompt: string) => {
@@ -1277,7 +1417,7 @@ ANSWER DIRECTLY:`;
       // MULTIMODAL PROVIDER ORDER: Gemini Flash → OpenAI → Claude → Gemini Pro
       // Groq does NOT support vision
       if (this.client) {
-        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL, imagePath) });
+        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL, imagePath, geminiFileParts) });
       }
       if (this.openaiClient) {
         providers.push({ name: `OpenAI (${OPENAI_MODEL})`, execute: () => this.streamWithOpenaiMultimodal(userContent, imagePath!, openaiSystemPrompt) });
@@ -1286,7 +1426,7 @@ ANSWER DIRECTLY:`;
         providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.streamWithClaudeMultimodal(userContent, imagePath!, claudeSystemPrompt) });
       }
       if (this.client) {
-        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL, imagePath) });
+        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL, imagePath, geminiFileParts) });
       }
     } else {
       // TEXT-ONLY PROVIDER ORDER: Groq → OpenAI → Claude → Gemini Flash → Gemini Pro
@@ -1300,8 +1440,8 @@ ANSWER DIRECTLY:`;
         providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.streamWithClaude(userContent, claudeSystemPrompt) });
       }
       if (this.client) {
-        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL) });
-        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL) });
+        providers.push({ name: `Gemini Flash (${GEMINI_FLASH_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_FLASH_MODEL, undefined, geminiFileParts) });
+        providers.push({ name: `Gemini Pro (${GEMINI_PRO_MODEL})`, execute: () => this.streamWithGeminiModel(combinedMessages.gemini, GEMINI_PRO_MODEL, undefined, geminiFileParts) });
       }
     }
 
@@ -1383,6 +1523,23 @@ ANSWER DIRECTLY:`;
 
     // Preparation
     const isMultimodal = !!imagePath;
+    let geminiFileParts: ContextInjectionFilePart[] = [];
+
+    if (this.contextBaseManager) {
+      try {
+        const contextInjection = await this.contextBaseManager.buildInjection(message, {
+          includeGeminiFiles: this.shouldIncludeGeminiFiles(isMultimodal),
+        });
+        if (contextInjection.contextBlock) {
+          context = context
+            ? `${contextInjection.contextBlock}\n\n${context}`
+            : contextInjection.contextBlock;
+        }
+        geminiFileParts = contextInjection.geminiFileParts || [];
+      } catch (contextError: any) {
+        console.warn('[LLMHelper] Context Base injection failed (stream):', contextError?.message || contextError);
+      }
+    }
 
     // Determine the system prompt to use
     // logic: if override provided, use it. otherwise use HARD_SYSTEM_PROMPT (which is the universal base)
@@ -1470,18 +1627,23 @@ ANSWER DIRECTLY:`;
       // Direct model use if specified
       if (this.currentModelId === GEMINI_PRO_MODEL) {
         const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
-        yield* this.streamWithGeminiModel(fullMsg, GEMINI_PRO_MODEL, imagePath);
+        yield* this.streamWithGeminiModel(fullMsg, GEMINI_PRO_MODEL, imagePath, geminiFileParts);
         return;
       }
       if (this.currentModelId === GEMINI_FLASH_MODEL) {
         const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
-        yield* this.streamWithGeminiModel(fullMsg, GEMINI_FLASH_MODEL, imagePath);
+        yield* this.streamWithGeminiModel(fullMsg, GEMINI_FLASH_MODEL, imagePath, geminiFileParts);
+        return;
+      }
+      if (this.currentModelId === GEMINI_FLASH_LITE_MODEL || this.currentModelId === GEMINI_FLASH_LITE_CANONICAL_MODEL) {
+        const fullMsg = `${finalSystemPrompt}\n\n${userContent}`;
+        yield* this.streamWithGeminiModel(fullMsg, GEMINI_FLASH_LITE_CANONICAL_MODEL, imagePath, geminiFileParts);
         return;
       }
 
       // Race strategy (default)
       const raceMsg = `${finalSystemPrompt}\n\n${userContent}`;
-      yield* this.streamWithGeminiParallelRace(raceMsg, imagePath);
+      yield* this.streamWithGeminiParallelRace(raceMsg, imagePath, geminiFileParts);
     } else {
       throw new Error("No LLM provider available");
     }
@@ -1631,19 +1793,33 @@ ANSWER DIRECTLY:`;
   /**
    * Stream response from a specific Gemini model
    */
-  private async * streamWithGeminiModel(fullMessage: string, model: string, imagePath?: string): AsyncGenerator<string, void, unknown> {
+  private async * streamWithGeminiModel(
+    fullMessage: string,
+    model: string,
+    imagePath?: string,
+    geminiFileParts: ContextInjectionFilePart[] = []
+  ): AsyncGenerator<string, void, unknown> {
+    try {
+      yield* this.streamWithGeminiModelInternal(fullMessage, model, imagePath, geminiFileParts);
+    } catch (error: any) {
+      if (!this.shouldRetryWithoutGeminiFiles(error, geminiFileParts)) {
+        throw error;
+      }
+      console.warn('[LLMHelper] Gemini stream failed with file context; retrying without file parts.');
+      await this.handleGeminiFileReferenceFailure(geminiFileParts, error);
+      yield* this.streamWithGeminiModelInternal(fullMessage, model, imagePath, []);
+    }
+  }
+
+  private async * streamWithGeminiModelInternal(
+    fullMessage: string,
+    model: string,
+    imagePath?: string,
+    geminiFileParts: ContextInjectionFilePart[] = []
+  ): AsyncGenerator<string, void, unknown> {
     if (!this.client) throw new Error("Gemini client not initialized");
 
-    const contents: any[] = [{ text: fullMessage }];
-    if (imagePath) {
-      const imageData = await fs.promises.readFile(imagePath);
-      contents.push({
-        inlineData: {
-          mimeType: "image/png",
-          data: imageData.toString("base64")
-        }
-      });
-    }
+    const contents = await this.buildGeminiContents(fullMessage, imagePath, geminiFileParts);
 
     const streamResult = await this.client.models.generateContentStream({
       model: model,
@@ -1675,12 +1851,16 @@ ANSWER DIRECTLY:`;
   /**
    * Race Flash and Pro streams, return whichever succeeds first
    */
-  private async * streamWithGeminiParallelRace(fullMessage: string, imagePath?: string): AsyncGenerator<string, void, unknown> {
+  private async * streamWithGeminiParallelRace(
+    fullMessage: string,
+    imagePath?: string,
+    geminiFileParts: ContextInjectionFilePart[] = []
+  ): AsyncGenerator<string, void, unknown> {
     if (!this.client) throw new Error("Gemini client not initialized");
 
     // Start both streams
-    const flashPromise = this.collectStreamResponse(fullMessage, GEMINI_FLASH_MODEL, imagePath);
-    const proPromise = this.collectStreamResponse(fullMessage, GEMINI_PRO_MODEL, imagePath);
+    const flashPromise = this.collectStreamResponse(fullMessage, GEMINI_FLASH_MODEL, imagePath, geminiFileParts);
+    const proPromise = this.collectStreamResponse(fullMessage, GEMINI_PRO_MODEL, imagePath, geminiFileParts);
 
     // Race - whoever finishes first wins
     const result = await Promise.any([flashPromise, proPromise]);
@@ -1696,30 +1876,38 @@ ANSWER DIRECTLY:`;
   /**
    * Collect full response from a Gemini model (non-streaming for race)
    */
-  private async collectStreamResponse(fullMessage: string, model: string, imagePath?: string): Promise<string> {
+  private async collectStreamResponse(
+    fullMessage: string,
+    model: string,
+    imagePath?: string,
+    geminiFileParts: ContextInjectionFilePart[] = []
+  ): Promise<string> {
     if (!this.client) throw new Error("Gemini client not initialized");
 
-    const contents: any[] = [{ text: fullMessage }];
-    if (imagePath) {
-      const imageData = await fs.promises.readFile(imagePath);
-      contents.push({
-        inlineData: {
-          mimeType: "image/png",
-          data: imageData.toString("base64")
+    const execute = async (effectiveGeminiFileParts: ContextInjectionFilePart[]): Promise<string> => {
+      const contents = await this.buildGeminiContents(fullMessage, imagePath, effectiveGeminiFileParts);
+      const response = await this.client!.models.generateContent({
+        model: model,
+        contents: contents,
+        config: {
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          temperature: 0.4,
         }
       });
-    }
 
-    const response = await this.client.models.generateContent({
-      model: model,
-      contents: contents,
-      config: {
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-        temperature: 0.4,
+      return response.text || "";
+    };
+
+    try {
+      return await execute(geminiFileParts);
+    } catch (error: any) {
+      if (!this.shouldRetryWithoutGeminiFiles(error, geminiFileParts)) {
+        throw error;
       }
-    });
-
-    return response.text || "";
+      console.warn('[LLMHelper] Gemini race call failed with file context; retrying without file parts.');
+      await this.handleGeminiFileReferenceFailure(geminiFileParts, error);
+      return execute([]);
+    }
   }
 
   // --- OLLAMA STREAMING ---
@@ -2352,7 +2540,8 @@ ANSWER DIRECTLY:`;
 
   public async switchToGemini(apiKey?: string, modelId?: string): Promise<void> {
     if (modelId) {
-      this.geminiModel = modelId;
+      this.currentModelId = modelId;
+      this.geminiModel = this.normalizeGeminiModelId(modelId);
     }
 
     if (apiKey) {

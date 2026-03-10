@@ -510,6 +510,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       if (apiKey) {
         const { CredentialsManager } = require('./services/CredentialsManager');
         CredentialsManager.getInstance().setGeminiApiKey(apiKey);
+        await appState.getContextBaseManager().refreshGeminiSyncForEligibleFiles();
       }
 
       return { success: true };
@@ -528,6 +529,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       // Also update the LLMHelper immediately
       const llmHelper = appState.processingHelper.getLLMHelper();
       llmHelper.setApiKey(apiKey);
+      await appState.getContextBaseManager().refreshGeminiSyncForEligibleFiles();
 
       // Re-init IntelligenceManager
       appState.getIntelligenceManager().initializeLLMs();
@@ -1069,7 +1071,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       let response;
 
       if (provider === 'gemini') {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_FLASH_MODEL}:generateContent`;
         response = await axios.post(url, {
           contents: [{ parts: [{ text: "Hello" }] }]
         }, {
@@ -1213,6 +1215,92 @@ export function initializeIpcHandlers(appState: AppState): void {
     } catch (error: any) {
       console.error("Error getting default model:", error);
       return { model: 'gemini-3-flash-preview' };
+    }
+  });
+
+  // Context Base
+  safeHandle("context:get-config", async () => {
+    try {
+      return appState.getContextBaseManager().getPublicConfig();
+    } catch (error: any) {
+      console.error("Error getting context base config:", error);
+      throw error;
+    }
+  });
+
+  safeHandle("context:set-enabled", async (_, enabled: boolean) => {
+    try {
+      return appState.getContextBaseManager().setEnabled(!!enabled);
+    } catch (error: any) {
+      console.error("Error setting context base enabled:", error);
+      throw error;
+    }
+  });
+
+  safeHandle("context:update-text", async (_, text: string) => {
+    try {
+      return appState.getContextBaseManager().setManualText(text || '');
+    } catch (error: any) {
+      console.error("Error updating context base text:", error);
+      throw error;
+    }
+  });
+
+  safeHandle("context:select-files", async () => {
+    try {
+      const result: any = await dialog.showOpenDialog({
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Context Files', extensions: ['pdf', 'docx', 'txt', 'md', 'json', 'csv', 'ppt', 'pptx', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'mp3', 'wav', 'm4a', 'mp4', 'mov', 'm4v'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { cancelled: true, paths: [] as string[] };
+      }
+
+      return { cancelled: false, paths: result.filePaths };
+    } catch (error: any) {
+      console.error("Error selecting context files:", error);
+      return { cancelled: true, error: error.message, paths: [] as string[] };
+    }
+  });
+
+  safeHandle("context:add-files", async (_, paths: string[]) => {
+    try {
+      return await appState.getContextBaseManager().addFiles(paths || []);
+    } catch (error: any) {
+      console.error("Error adding context files:", error);
+      throw error;
+    }
+  });
+
+  safeHandle("context:remove-file", async (_, fileId: string) => {
+    try {
+      return await appState.getContextBaseManager().removeFile(fileId);
+    } catch (error: any) {
+      console.error("Error removing context file:", error);
+      throw error;
+    }
+  });
+
+  safeHandle("context:toggle-file", async (_, fileId: string, enabled: boolean) => {
+    try {
+      return appState.getContextBaseManager().toggleFile(fileId, !!enabled);
+    } catch (error: any) {
+      console.error("Error toggling context file:", error);
+      throw error;
+    }
+  });
+
+  safeHandle("context:refresh-gemini-sync", async () => {
+    try {
+      await appState.getContextBaseManager().refreshGeminiSyncForEligibleFiles();
+      return appState.getContextBaseManager().getPublicConfig();
+    } catch (error: any) {
+      console.error("Error refreshing context Gemini sync:", error);
+      throw error;
     }
   });
 

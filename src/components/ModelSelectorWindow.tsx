@@ -81,6 +81,7 @@ const ModelSelectorWindow = () => {
                 if (creds?.hasGeminiKey) {
                     models.push({ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', type: 'cloud', provider: 'gemini' });
                     models.push({ id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', type: 'cloud', provider: 'gemini' });
+                    models.push({ id: 'gemini-3.1-flash-lite-preview-06-17', name: 'Gemini 3.1 Flash-Lite', type: 'cloud', provider: 'gemini' });
                 }
                 if (creds?.hasOpenaiKey) {
                     models.push({ id: 'gpt-5.2-chat-latest', name: 'GPT 5.2', type: 'cloud', provider: 'openai' });
@@ -155,7 +156,9 @@ const ModelSelectorWindow = () => {
                             </div>
                         ) : (
                             availableModels.map((model) => {
-                                const isSelected = currentModel === model.id;
+                                const isSelected =
+                                    currentModel === model.id ||
+                                    (model.id === 'gemini-3.1-flash-lite-preview-06-17' && currentModel === 'gemini-3.1-flash-lite-preview');
                                 return (
                                     <button
                                         key={model.id}

@@ -1712,6 +1712,7 @@ Provide only the answer, nothing else.`;
                                                     if (m.startsWith('ollama-')) return m.replace('ollama-', '');
                                                     if (m === 'gemini-3-flash-preview') return 'Gemini 3 Flash';
                                                     if (m === 'gemini-3-pro-preview') return 'Gemini 3 Pro';
+                                                    if (m === 'gemini-3.1-flash-lite-preview-06-17' || m === 'gemini-3.1-flash-lite-preview') return 'Gemini 3.1 Flash-Lite';
                                                     if (m === 'llama-3.3-70b-versatile') return 'Groq Llama 3.3';
                                                     if (m === 'gpt-5.2-chat-latest') return 'GPT 5.2';
                                                     if (m === 'claude-sonnet-4-5') return 'Sonnet 4.5';

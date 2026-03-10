@@ -1,5 +1,42 @@
 import { contextBridge, ipcRenderer } from "electron"
 
+type ContextParseStatus = 'processing' | 'ready' | 'gemini-only' | 'error'
+type ContextGeminiStatus = 'pending' | 'uploading' | 'synced' | 'expired' | 'error'
+
+interface ContextFileRecord {
+  id: string
+  name: string
+  mimeType: string
+  sizeBytes: number
+  enabled: boolean
+  parseStatus: ContextParseStatus
+  parseError?: string
+  extractedChars: number
+  geminiStatus: ContextGeminiStatus
+  geminiError?: string
+  geminiExpiresAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+interface ContextBaseConfig {
+  enabled: boolean
+  manualText: string
+  files: ContextFileRecord[]
+  updatedAt: number
+}
+
+interface ContextAddFilesResult {
+  results: Array<{ filePath: string; success: boolean; fileId?: string; error?: string }>
+  config: ContextBaseConfig
+}
+
+interface ContextSelectFilesResult {
+  cancelled?: boolean
+  paths?: string[]
+  error?: string
+}
+
 // Types for the exposed Electron API
 interface ElectronAPI {
   updateContentDimensions: (dimensions: {
@@ -217,6 +254,16 @@ interface ElectronAPI {
   profileDelete: () => Promise<{ success: boolean; error?: string }>;
   profileGetProfile: () => Promise<any>;
   profileSelectFile: () => Promise<{ success?: boolean; cancelled?: boolean; filePath?: string; error?: string }>;
+
+  // Context Base API
+  contextGetConfig: () => Promise<ContextBaseConfig>
+  contextSetEnabled: (enabled: boolean) => Promise<ContextBaseConfig>
+  contextUpdateText: (text: string) => Promise<ContextBaseConfig>
+  contextSelectFiles: () => Promise<ContextSelectFilesResult>
+  contextAddFiles: (paths: string[]) => Promise<ContextAddFilesResult>
+  contextRemoveFile: (fileId: string) => Promise<ContextBaseConfig>
+  contextToggleFile: (fileId: string, enabled: boolean) => Promise<ContextBaseConfig>
+  contextRefreshGeminiSync: () => Promise<ContextBaseConfig>
 
   // JD & Research API
   profileUploadJD: (filePath: string) => Promise<{ success: boolean; error?: string }>;
@@ -844,6 +891,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   profileDelete: () => ipcRenderer.invoke('profile:delete'),
   profileGetProfile: () => ipcRenderer.invoke('profile:get-profile'),
   profileSelectFile: () => ipcRenderer.invoke('profile:select-file'),
+
+  // Context Base API
+  contextGetConfig: () => ipcRenderer.invoke('context:get-config'),
+  contextSetEnabled: (enabled: boolean) => ipcRenderer.invoke('context:set-enabled', enabled),
+  contextUpdateText: (text: string) => ipcRenderer.invoke('context:update-text', text),
+  contextSelectFiles: () => ipcRenderer.invoke('context:select-files'),
+  contextAddFiles: (paths: string[]) => ipcRenderer.invoke('context:add-files', paths),
+  contextRemoveFile: (fileId: string) => ipcRenderer.invoke('context:remove-file', fileId),
+  contextToggleFile: (fileId: string, enabled: boolean) => ipcRenderer.invoke('context:toggle-file', fileId, enabled),
+  contextRefreshGeminiSync: () => ipcRenderer.invoke('context:refresh-gemini-sync'),
 
   // JD & Research API
   profileUploadJD: (filePath: string) => ipcRenderer.invoke('profile:upload-jd', filePath),

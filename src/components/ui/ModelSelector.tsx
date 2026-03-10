@@ -66,6 +66,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
         if (model.startsWith('ollama-')) return model.replace('ollama-', '');
         if (model === 'gemini-3-flash-preview') return 'Gemini 3 Flash';
         if (model === 'gemini-3-pro-preview') return 'Gemini 3 Pro';
+        if (model === 'gemini-3.1-flash-lite-preview-06-17' || model === 'gemini-3.1-flash-lite-preview') return 'Gemini 3.1 Flash-Lite';
         if (model === 'llama-3.3-70b-versatile') return 'Groq Llama 3.3';
         if (model === 'gpt-5.2-chat-latest') return 'GPT 5.2';
         if (model === 'claude-sonnet-4-5') return 'Sonnet 4.5';
@@ -132,6 +133,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
                                     icon={<Monitor size={14} />}
                                     selected={currentModel === 'gemini-3-pro-preview'}
                                     onSelect={() => handleSelect('gemini-3-pro-preview')}
+                                />
+                                <ModelOption
+                                    id="gemini-3.1-flash-lite-preview-06-17"
+                                    name="Gemini 3.1 Flash-Lite"
+                                    desc="Low latency • Preview"
+                                    icon={<Monitor size={14} />}
+                                    selected={currentModel === 'gemini-3.1-flash-lite-preview-06-17' || currentModel === 'gemini-3.1-flash-lite-preview'}
+                                    onSelect={() => handleSelect('gemini-3.1-flash-lite-preview-06-17')}
                                 />
                                 <div className="h-px bg-border-subtle my-1" />
                                 <ModelOption

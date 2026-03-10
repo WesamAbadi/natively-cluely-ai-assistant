@@ -92,6 +92,7 @@ try {
 }
 
 import { CredentialsManager } from "./services/CredentialsManager"
+import { ContextBaseManager } from "./services/ContextBaseManager"
 import { ReleaseNotesManager } from "./update/ReleaseNotesManager"
 
 export class AppState {
@@ -106,6 +107,7 @@ export class AppState {
   private intelligenceManager: IntelligenceManager
   private themeManager: ThemeManager
   private ragManager: RAGManager | null = null
+  private contextBaseManager: ContextBaseManager
   private knowledgeOrchestrator: any = null
   private tray: Tray | null = null
   private updateAvailable: boolean = false
@@ -156,6 +158,8 @@ export class AppState {
 
     // Initialize ProcessingHelper
     this.processingHelper = new ProcessingHelper(this)
+    this.contextBaseManager = ContextBaseManager.getInstance();
+    this.processingHelper.getLLMHelper().setContextBaseManager(this.contextBaseManager);
 
     // Initialize KeybindManager
     const keybindManager = KeybindManager.getInstance();
@@ -1079,6 +1083,10 @@ export class AppState {
     return this.ragManager;
   }
 
+  public getContextBaseManager(): ContextBaseManager {
+    return this.contextBaseManager;
+  }
+
   public getKnowledgeOrchestrator(): any {
     return this.knowledgeOrchestrator;
   }
@@ -1606,6 +1614,9 @@ async function initializeApp() {
 
   // Explicitly load credentials into helpers
   appState.processingHelper.loadStoredCredentials();
+  void appState.getContextBaseManager().refreshGeminiSyncForEligibleFiles().catch((err) => {
+    console.warn('[Main] Initial Context Base Gemini sync skipped:', err?.message || err);
+  });
 
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)
@@ -1633,6 +1644,9 @@ async function initializeApp() {
 
     // Load stored API keys into ProcessingHelper/LLMHelper
     appState.processingHelper.loadStoredCredentials();
+    void appState.getContextBaseManager().refreshGeminiSyncForEligibleFiles().catch((err) => {
+      console.warn('[Main] Context Base Gemini sync skipped:', err?.message || err);
+    });
 
     // Load stored Google Service Account path (for Speech-to-Text)
     const storedServiceAccountPath = CredentialsManager.getInstance().getGoogleServiceAccountPath();

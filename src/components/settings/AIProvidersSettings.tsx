@@ -136,7 +136,7 @@ export const AIProvidersSettings: React.FC = () => {
                 // @ts-ignore
                 const result = await window.electronAPI?.getDefaultModel();
                 if (result && result.model) {
-                    setDefaultModel(result.model);
+                    setDefaultModel(result.model === 'gemini-3.1-flash-lite-preview' ? 'gemini-3.1-flash-lite-preview-06-17' : result.model);
                 }
 
                 // Check Ollama
@@ -416,6 +416,7 @@ export const AIProvidersSettings: React.FC = () => {
                         value={defaultModel}
                         options={[
                             ...(hasStoredKey.gemini ? [{ id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' }] : []),
+                            ...(hasStoredKey.gemini ? [{ id: 'gemini-3.1-flash-lite-preview-06-17', name: 'Gemini 3.1 Flash-Lite (Preview)' }] : []),
                             ...(hasStoredKey.openai ? [{ id: 'gpt-5.2-chat-latest', name: 'GPT 5.2' }] : []),
                             ...(hasStoredKey.claude ? [{ id: 'claude-sonnet-4-5', name: 'Sonnet 4.5' }] : []),
                             ...(hasStoredKey.groq ? [{ id: 'llama-3.3-70b-versatile', name: 'Groq Llama 3.3' }] : []),
