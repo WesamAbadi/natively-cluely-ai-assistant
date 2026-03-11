@@ -698,11 +698,30 @@ export class ContextBaseManager {
 
   private async extractText(filePath: string, extension: string): Promise<string | null> {
     if (extension === '.pdf') {
-      const mod = await import('pdf-parse');
-      const pdfParse = (mod as any).default || mod;
       const buffer = await fs.promises.readFile(filePath);
-      const parsed = await pdfParse(buffer);
-      return parsed?.text || '';
+      const mod = await import('pdf-parse');
+
+      // pdf-parse v2 exports a PDFParse class. Keep a legacy fallback for v1-style function export.
+      const PDFParseCtor = (mod as any).PDFParse || (mod as any).default?.PDFParse;
+      if (typeof PDFParseCtor === 'function') {
+        const parser = new PDFParseCtor({ data: new Uint8Array(buffer) });
+        try {
+          const parsed = await parser.getText();
+          return parsed?.text || '';
+        } finally {
+          if (typeof parser.destroy === 'function') {
+            await parser.destroy().catch(() => {});
+          }
+        }
+      }
+
+      const legacyParser = (mod as any).default || mod;
+      if (typeof legacyParser === 'function') {
+        const parsed = await legacyParser(buffer);
+        return parsed?.text || '';
+      }
+
+      throw new Error('Unsupported pdf-parse module format');
     }
 
     if (extension === '.docx') {

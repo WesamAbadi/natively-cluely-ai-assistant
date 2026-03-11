@@ -33,13 +33,17 @@ const ModelSelectorWindow = () => {
                 setIsLoading(true);
             }
             try {
+                const api = window.electronAPI as any;
+                const invoke = typeof api?.invoke === 'function' ? api.invoke.bind(api) : null;
+
                 // 1. Get Stored Credentials (to know which Cloud providers are active)
-                // @ts-ignore
                 const creds = await window.electronAPI?.getStoredCredentials?.();
 
                 // 2. Get Custom Providers
-                // @ts-ignore
-                const customProviders = await window.electronAPI?.invoke('get-custom-providers') || [];
+                const customProviders =
+                    (await window.electronAPI?.getCustomProviders?.()) ||
+                    (invoke ? await invoke('get-custom-providers') : []) ||
+                    [];
 
                 // 3. Get Ollama Models (if any available/checked previously)
                 // We won't trigger a fresh check here to avoid startup delay, just check if we have any cached?
@@ -51,19 +55,22 @@ const ModelSelectorWindow = () => {
                 // It's fast if Ollama server is running.
                 let ollamaModels: string[] = [];
                 try {
-                    // @ts-ignore
-                    let oModels = await window.electronAPI?.invoke('get-available-ollama-models');
+                    let oModels =
+                        (await window.electronAPI?.getAvailableOllamaModels?.()) ||
+                        (invoke ? await invoke('get-available-ollama-models') : []);
 
                     // If no models found, try to fix/restart Ollama (server might be down)
                     if (!oModels || oModels.length === 0) {
                         try {
-                            // @ts-ignore
-                            await window.electronAPI?.invoke('force-restart-ollama');
+                            if (invoke) {
+                                await invoke('force-restart-ollama');
+                            }
                             // Wait a moment for server to come up
                             await new Promise(resolve => setTimeout(resolve, 1500));
                             // Retry fetch
-                            // @ts-ignore
-                            oModels = await window.electronAPI?.invoke('get-available-ollama-models');
+                            oModels =
+                                (await window.electronAPI?.getAvailableOllamaModels?.()) ||
+                                (invoke ? await invoke('get-available-ollama-models') : []);
                         } catch (e) {
                             console.warn("Retrying Ollama failed", e);
                         }
@@ -107,8 +114,9 @@ const ModelSelectorWindow = () => {
                 setAvailableModels(models);
 
                 // 4. Get Current Active Model
-                // @ts-ignore
-                const config = await window.electronAPI?.invoke('get-current-llm-config'); // Get runtime model
+                const config =
+                    (await window.electronAPI?.getCurrentLlmConfig?.()) ||
+                    (invoke ? await invoke('get-current-llm-config') : undefined);
                 if (config && config.model) {
                     setCurrentModel(config.model);
                     localStorage.setItem('cached-current-model', config.model);
@@ -134,9 +142,17 @@ const ModelSelectorWindow = () => {
     const handleSelectFn = (modelId: string) => {
         setCurrentModel(modelId);
         localStorage.setItem('cached-current-model', modelId);
-        // @ts-ignore - this will set model + close window
-        window.electronAPI?.invoke('set-model', modelId)
-            .catch((err: any) => console.error("Failed to set model:", err));
+        const api = window.electronAPI as any;
+        const invoke = typeof api?.invoke === 'function' ? api.invoke.bind(api) : null;
+        const setModel = window.electronAPI?.setModel?.bind(window.electronAPI);
+
+        const action = setModel
+            ? setModel(modelId)
+            : invoke
+                ? invoke('set-model', modelId)
+                : Promise.reject(new Error('No model setter API available'));
+
+        action.catch((err: any) => console.error("Failed to set model:", err));
     };
 
     return (

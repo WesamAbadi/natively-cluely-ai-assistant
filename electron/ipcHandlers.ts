@@ -1323,8 +1323,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // Native Audio Service Handlers
   // Native Audio handlers removed as part of migration to driverless architecture
   safeHandle("native-audio-status", async () => {
-    // Always return true or pseudo-status since it's "driverless"
-    return { connected: true };
+    return appState.getNativeAudioStatus();
   });
 
   safeHandle("get-input-devices", async () => {

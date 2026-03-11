@@ -133,6 +133,23 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             .catch((err: any) => console.error("Failed to set model:", err));
     };
 
+    const getModelDisplayName = (modelId: string): string => {
+        if (!modelId) return 'Select model';
+        if (modelId.startsWith('ollama-')) return modelId.replace('ollama-', '');
+        if (modelId === 'gemini-3-flash-preview') return 'Gemini 3 Flash';
+        if (modelId === 'gemini-3-pro-preview') return 'Gemini 3 Pro';
+        if (modelId === 'gemini-3.1-flash-lite-preview-06-17' || modelId === 'gemini-3.1-flash-lite-preview') return 'Gemini 3.1 Flash-Lite';
+        if (modelId === 'llama-3.3-70b-versatile') return 'Groq Llama 3.3';
+        if (modelId === 'gpt-5.2-chat-latest') return 'GPT 5.2';
+        if (modelId === 'claude-sonnet-4-5') return 'Sonnet 4.5';
+        return modelId
+            .replace(/^curl-/, '')
+            .replace(/[-_]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+    };
+
     // Listen for default model changes from Settings
     useEffect(() => {
         if (!window.electronAPI?.onModelChanged) return;
@@ -1707,17 +1724,7 @@ Provide only the answer, nothing else.`;
                                             `}
                                         >
                                             <span className="truncate min-w-0 flex-1">
-                                                {(() => {
-                                                    const m = currentModel;
-                                                    if (m.startsWith('ollama-')) return m.replace('ollama-', '');
-                                                    if (m === 'gemini-3-flash-preview') return 'Gemini 3 Flash';
-                                                    if (m === 'gemini-3-pro-preview') return 'Gemini 3 Pro';
-                                                    if (m === 'gemini-3.1-flash-lite-preview-06-17' || m === 'gemini-3.1-flash-lite-preview') return 'Gemini 3.1 Flash-Lite';
-                                                    if (m === 'llama-3.3-70b-versatile') return 'Groq Llama 3.3';
-                                                    if (m === 'gpt-5.2-chat-latest') return 'GPT 5.2';
-                                                    if (m === 'claude-sonnet-4-5') return 'Sonnet 4.5';
-                                                    return m;
-                                                })()}
+                                                {getModelDisplayName(currentModel)}
                                             </span>
                                             <ChevronDown size={14} className="shrink-0 transition-transform" />
                                         </button>

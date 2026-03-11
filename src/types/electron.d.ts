@@ -30,6 +30,7 @@ export interface ContextInjectionResult {
 }
 
 export interface ElectronAPI {
+  invoke: (channel: string, ...args: any[]) => Promise<any>
   updateContentDimensions: (dimensions: {
     width: number
     height: number

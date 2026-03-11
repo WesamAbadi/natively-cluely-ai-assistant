@@ -39,6 +39,7 @@ interface ContextSelectFilesResult {
 
 // Types for the exposed Electron API
 interface ElectronAPI {
+  invoke: (channel: string, ...args: any[]) => Promise<any>
   updateContentDimensions: (dimensions: {
     width: number
     height: number
@@ -295,6 +296,7 @@ export const PROCESSING_EVENTS = {
 
 // Expose the Electron API to the renderer process
 contextBridge.exposeInMainWorld("electronAPI", {
+  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
   updateContentDimensions: (dimensions: { width: number; height: number }) =>
     ipcRenderer.invoke("update-content-dimensions", dimensions),
   getRecognitionLanguages: () => ipcRenderer.invoke("get-recognition-languages"),

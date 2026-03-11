@@ -480,58 +480,96 @@ export class AppState {
 
   private createSTTProvider(speaker: 'interviewer' | 'user'): GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT {
     const { CredentialsManager } = require('./services/CredentialsManager');
-    const sttProvider = CredentialsManager.getInstance().getSttProvider();
-    const sttLanguage = CredentialsManager.getInstance().getSttLanguage();
+    const cm = CredentialsManager.getInstance();
+    type SttProviderId = 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox';
+    const requestedProvider = cm.getSttProvider() as SttProviderId;
+    const sttLanguage = cm.getSttLanguage();
 
-    let stt: GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT;
+    const hasGoogleServiceAccount = (): boolean => {
+      const configuredPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || cm.getGoogleServiceAccountPath();
+      if (!configuredPath) return false;
+      try {
+        return fs.existsSync(configuredPath);
+      } catch {
+        return false;
+      }
+    };
 
-    if (sttProvider === 'deepgram') {
-      const apiKey = CredentialsManager.getInstance().getDeepgramApiKey();
-      if (apiKey) {
+    const createProviderFor = (provider: SttProviderId): GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT | null => {
+      if (provider === 'google') {
+        if (!hasGoogleServiceAccount()) {
+          return null;
+        }
+        console.log(`[Main] Using GoogleSTT for ${speaker}`);
+        return new GoogleSTT();
+      }
+
+      if (provider === 'deepgram') {
+        const apiKey = cm.getDeepgramApiKey();
+        if (!apiKey) return null;
         console.log(`[Main] Using DeepgramStreamingSTT for ${speaker}`);
-        stt = new DeepgramStreamingSTT(apiKey);
-      } else {
-        console.warn(`[Main] No API key for Deepgram STT, falling back to GoogleSTT`);
-        stt = new GoogleSTT();
+        return new DeepgramStreamingSTT(apiKey);
       }
-    } else if (sttProvider === 'soniox') {
-      const apiKey = CredentialsManager.getInstance().getSonioxApiKey();
-      if (apiKey) {
+
+      if (provider === 'soniox') {
+        const apiKey = cm.getSonioxApiKey();
+        if (!apiKey) return null;
         console.log(`[Main] Using SonioxStreamingSTT for ${speaker}`);
-        stt = new SonioxStreamingSTT(apiKey);
-      } else {
-        console.warn(`[Main] No API key for Soniox STT, falling back to GoogleSTT`);
-        stt = new GoogleSTT();
+        return new SonioxStreamingSTT(apiKey);
       }
-    } else if (sttProvider === 'groq' || sttProvider === 'openai' || sttProvider === 'elevenlabs' || sttProvider === 'azure' || sttProvider === 'ibmwatson') {
+
       let apiKey: string | undefined;
       let region: string | undefined;
       let modelOverride: string | undefined;
 
-      if (sttProvider === 'groq') {
-        apiKey = CredentialsManager.getInstance().getGroqSttApiKey();
-        modelOverride = CredentialsManager.getInstance().getGroqSttModel();
-      } else if (sttProvider === 'openai') {
-        apiKey = CredentialsManager.getInstance().getOpenAiSttApiKey();
-      } else if (sttProvider === 'elevenlabs') {
-        apiKey = CredentialsManager.getInstance().getElevenLabsApiKey();
-      } else if (sttProvider === 'azure') {
-        apiKey = CredentialsManager.getInstance().getAzureApiKey();
-        region = CredentialsManager.getInstance().getAzureRegion();
-      } else if (sttProvider === 'ibmwatson') {
-        apiKey = CredentialsManager.getInstance().getIbmWatsonApiKey();
-        region = CredentialsManager.getInstance().getIbmWatsonRegion();
+      if (provider === 'groq') {
+        apiKey = cm.getGroqSttApiKey() || cm.getGroqApiKey();
+        modelOverride = cm.getGroqSttModel();
+      } else if (provider === 'openai') {
+        apiKey = cm.getOpenAiSttApiKey() || cm.getOpenaiApiKey();
+      } else if (provider === 'elevenlabs') {
+        apiKey = cm.getElevenLabsApiKey();
+      } else if (provider === 'azure') {
+        apiKey = cm.getAzureApiKey();
+        region = cm.getAzureRegion();
+      } else if (provider === 'ibmwatson') {
+        apiKey = cm.getIbmWatsonApiKey();
+        region = cm.getIbmWatsonRegion();
       }
 
-      if (apiKey) {
-        console.log(`[Main] Using RestSTT (${sttProvider}) for ${speaker}`);
-        stt = new RestSTT(sttProvider, apiKey, modelOverride, region);
-      } else {
-        console.warn(`[Main] No API key for ${sttProvider} STT, falling back to GoogleSTT`);
-        stt = new GoogleSTT();
+      if (!apiKey) return null;
+      console.log(`[Main] Using RestSTT (${provider}) for ${speaker}`);
+      return new RestSTT(provider, apiKey, modelOverride, region);
+    };
+
+    const providerOrder: SttProviderId[] = [
+      requestedProvider,
+      'soniox',
+      'deepgram',
+      'groq',
+      'openai',
+      'elevenlabs',
+      'azure',
+      'ibmwatson',
+      'google'
+    ].filter((provider, index, all) => all.indexOf(provider) === index) as SttProviderId[];
+
+    let stt: GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT | null = null;
+    let resolvedProvider: SttProviderId = requestedProvider;
+    for (const provider of providerOrder) {
+      stt = createProviderFor(provider);
+      if (stt) {
+        resolvedProvider = provider;
+        break;
       }
-    } else {
+    }
+
+    if (!stt) {
+      console.error('[Main] No valid STT provider credentials found. Falling back to GoogleSTT (may fail without a service account).');
       stt = new GoogleSTT();
+      resolvedProvider = 'google';
+    } else if (resolvedProvider !== requestedProvider) {
+      console.warn(`[Main] Requested STT provider "${requestedProvider}" is unavailable. Using "${resolvedProvider}" instead.`);
     }
 
     stt.setRecognitionLanguage(sttLanguage);
@@ -559,7 +597,6 @@ export class AppState {
         }]);
       }
 
-      const helper = this.getWindowHelper();
       const payload = {
         speaker: speaker,
         text: segment.text,
@@ -567,8 +604,11 @@ export class AppState {
         final: segment.isFinal,
         confidence: segment.confidence
       };
-      helper.getLauncherWindow()?.webContents.send('native-audio-transcript', payload);
-      helper.getOverlayWindow()?.webContents.send('native-audio-transcript', payload);
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('native-audio-transcript', payload);
+        }
+      });
     });
 
     stt.on('error', (err: Error) => {
@@ -807,6 +847,16 @@ export class AppState {
     }
   }
 
+  public getNativeAudioStatus(): { connected: boolean } {
+    const connected =
+      this.isMeetingActive &&
+      !!this.systemAudioCapture &&
+      !!this.microphoneCapture &&
+      !!this.googleSTT &&
+      !!this.googleSTT_User;
+    return { connected };
+  }
+
   public async startMeeting(metadata?: any): Promise<void> {
     console.log('[Main] Starting Meeting...', metadata);
 
@@ -835,6 +885,12 @@ export class AppState {
     this.microphoneCapture?.start();
     this.googleSTT_User?.start();
 
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('native-audio-connected');
+      }
+    });
+
     // 5. Start JIT RAG live indexing
     if (this.ragManager) {
       this.ragManager.startLiveIndexing('live-meeting-current');
@@ -852,6 +908,12 @@ export class AppState {
     // 4. Stop Microphone
     this.microphoneCapture?.stop();
     this.googleSTT_User?.stop();
+
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('native-audio-disconnected');
+      }
+    });
 
     // 4b. Stop JIT RAG live indexing (flush remaining segments)
     if (this.ragManager) {
