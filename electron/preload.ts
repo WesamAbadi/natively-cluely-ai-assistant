@@ -167,6 +167,9 @@ interface ElectronAPI {
   // Exam Mode
   getExamMode: () => Promise<{ enabled: boolean }>
   setExamMode: (enabled: boolean) => Promise<{ success: boolean; enabled?: boolean; error?: string }>
+  getExamModePrompt: () => Promise<{ success: boolean; prompt?: string; error?: string }>
+  getDefaultExamModePrompt: () => Promise<{ success: boolean; prompt?: string; error?: string }>
+  setExamModePrompt: (prompt: string) => Promise<{ success: boolean; error?: string }>
   onExamModeChanged: (callback: (enabled: boolean) => void) => () => void
 
   // Demo
@@ -726,6 +729,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Exam Mode
   getExamMode: () => ipcRenderer.invoke('get-exam-mode'),
   setExamMode: (enabled: boolean) => ipcRenderer.invoke('set-exam-mode', enabled),
+  getExamModePrompt: () => ipcRenderer.invoke('get-exam-mode-prompt'),
+  getDefaultExamModePrompt: () => ipcRenderer.invoke('get-default-exam-mode-prompt'),
+  setExamModePrompt: (prompt: string) => ipcRenderer.invoke('set-exam-mode-prompt', prompt),
   onExamModeChanged: (callback: (enabled: boolean) => void) => {
     const subscription = (_: any, enabled: boolean) => callback(enabled)
     ipcRenderer.on('exam-mode-changed', subscription)

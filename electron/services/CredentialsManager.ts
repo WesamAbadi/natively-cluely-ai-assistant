@@ -48,6 +48,10 @@ export interface StoredCredentials {
     // Google Custom Search
     googleSearchApiKey?: string;
     googleSearchCseId?: string;
+
+    // Exam Mode
+    examModeEnabled?: boolean;
+    examModePrompt?: string;
 }
 
 export class CredentialsManager {
@@ -163,6 +167,14 @@ export class CredentialsManager {
     }
     public getDefaultModel(): string {
         return this.credentials.defaultModel || 'gemini-3-flash-preview';
+    }
+
+    public getExamModeEnabled(): boolean {
+        return !!this.credentials.examModeEnabled;
+    }
+
+    public getExamModePrompt(): string | undefined {
+        return this.credentials.examModePrompt;
     }
 
     public getAllCredentials(): StoredCredentials {
@@ -296,6 +308,18 @@ export class CredentialsManager {
         this.credentials.defaultModel = model;
         this.saveCredentials();
         console.log(`[CredentialsManager] Default Model set to: ${model}`);
+    }
+
+    public setExamModeEnabled(enabled: boolean): void {
+        this.credentials.examModeEnabled = enabled;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] Exam Mode Enabled set to: ${enabled}`);
+    }
+
+    public setExamModePrompt(prompt: string): void {
+        this.credentials.examModePrompt = prompt;
+        this.saveCredentials();
+        console.log(`[CredentialsManager] Exam Mode Prompt updated`);
     }
 
     public saveCustomProvider(provider: CustomProvider): void {

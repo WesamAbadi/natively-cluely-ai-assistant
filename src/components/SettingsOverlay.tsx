@@ -226,12 +226,12 @@ interface SettingsOverlayProps {
 
 const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, initialTab = 'general' }) => {
     const [activeTab, setActiveTab] = useState(initialTab);
-    
+
     // Sync active tab when modal opens
     useEffect(() => {
         if (isOpen && initialTab) {
             setActiveTab(initialTab);
-            
+
             // Proactively load profile data if starting on profile tab
             if (initialTab === 'profile') {
                 window.electronAPI?.profileGetStatus?.().then(setProfileStatus).catch(() => { });
@@ -239,7 +239,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
             }
         }
     }, [isOpen, initialTab]);
-    
+
     const { shortcuts, updateShortcut, resetShortcuts } = useShortcuts();
     const [isUndetectable, setIsUndetectable] = useState(false);
     const [disguiseMode, setDisguiseMode] = useState<'terminal' | 'settings' | 'activity' | 'none'>('none');
@@ -274,6 +274,12 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
     const [hasStoredGoogleSearchCseId, setHasStoredGoogleSearchCseId] = useState(false);
     const [googleSearchSaving, setGoogleSearchSaving] = useState(false);
 
+    // Exam Mode State
+    const [isExamMode, setIsExamMode] = useState(false);
+    const [examPrompt, setExamPrompt] = useState("");
+    const [isExamSaving, setIsExamSaving] = useState(false);
+
+
     // Close dropdown when clicking outside
     // Sync with global state changes
     useEffect(() => {
@@ -286,6 +292,27 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                 setIsUndetectable(newState);
             });
             return () => unsubscribe();
+        }
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (isOpen && window.electronAPI?.getExamMode) {
+            window.electronAPI.getExamMode().then((res: any) => {
+                setIsExamMode(res?.enabled || false);
+            }).catch(() => { });
+
+            window.electronAPI?.getExamModePrompt?.().then((res: any) => {
+                if (res?.success && res.prompt) {
+                    setExamPrompt(res.prompt);
+                } else {
+                    // Fetch default template if none saved
+                    window.electronAPI?.getDefaultExamModePrompt?.().then((defRes: any) => {
+                        if (defRes?.success && defRes.prompt) {
+                            setExamPrompt(defRes.prompt || "");
+                        }
+                    });
+                }
+            }).catch(() => { });
         }
     }, [isOpen]);
 
@@ -853,9 +880,9 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                         initial={{ scale: 0.94, opacity: 0, y: 20 }}
                         animate={{ scale: 1, opacity: 1, y: 0 }}
                         exit={{ scale: 0.94, opacity: 0, y: 20 }}
-                        transition={{ 
-                            type: "spring", 
-                            stiffness: 400, 
+                        transition={{
+                            type: "spring",
+                            stiffness: 400,
                             damping: 32,
                             mass: 1
                         }}
@@ -1132,6 +1159,85 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                                                         )}
                                                     </div>
                                                 </div>
+
+                                                <div className="h-px bg-border-subtle my-2" />
+
+                                                {/* Exam Mode Session */}
+                                                <div className="space-y-4 pt-2">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-10 h-10 bg-bg-item-surface rounded-lg border border-border-subtle flex items-center justify-center text-amber-500">
+                                                                <FlaskConical size={20} />
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="text-sm font-bold text-text-primary">Exam Mode</h3>
+                                                                <p className="text-xs text-text-secondary mt-0.5 tracking-tight pr-4">Forces the model to be extremely concise and direct (Beta)</p>
+                                                            </div>
+                                                        </div>
+                                                        <div
+                                                            onClick={async () => {
+                                                                const newState = !isExamMode;
+                                                                setIsExamMode(newState);
+                                                                if (window.electronAPI?.setExamMode) {
+                                                                    await window.electronAPI.setExamMode(newState);
+                                                                }
+                                                            }}
+                                                            className={`w-11 h-6 rounded-full relative cursor-pointer transition-colors ${isExamMode ? 'bg-amber-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                        >
+                                                            <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${isExamMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                                                        </div>
+                                                    </div>
+
+                                                    {isExamMode && (
+                                                        <div className="bg-bg-item-surface rounded-xl border border-border-subtle p-3 space-y-3 animated slideInDown">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <label className="text-[10px] font-bold text-text-tertiary uppercase tracking-widest block">Custom System Prompt</label>
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        const res = await window.electronAPI?.getDefaultExamModePrompt?.();
+                                                                        if (res?.success && res.prompt) {
+                                                                            setExamPrompt(res.prompt || "");
+                                                                        }
+                                                                    }}
+                                                                    className="flex items-center gap-1 text-[9px] font-bold text-amber-500/70 hover:text-amber-500 transition-colors uppercase tracking-tighter"
+                                                                >
+                                                                    <RotateCcw size={10} />
+                                                                    Restore Default
+                                                                </button>
+                                                            </div>
+                                                            <div>
+                                                                <textarea
+                                                                    value={examPrompt}
+                                                                    onChange={(e) => setExamPrompt(e.target.value)}
+                                                                    placeholder="Enter custom instructions for exam mode..."
+                                                                    className="w-full bg-bg-input border border-border-subtle rounded-lg p-3 text-xs text-text-primary min-h-[150px] focus:outline-none focus:border-amber-500/50 transition-all font-mono leading-relaxed"
+                                                                />
+                                                            </div>
+                                                            <div className="flex justify-end">
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        setIsExamSaving(true);
+                                                                        try {
+                                                                            if (window.electronAPI?.setExamModePrompt) {
+                                                                                await window.electronAPI.setExamModePrompt(examPrompt);
+                                                                            }
+                                                                            // Visual feedback
+                                                                            setTimeout(() => setIsExamSaving(false), 800);
+                                                                        } catch (e) {
+                                                                            setIsExamSaving(false);
+                                                                        }
+                                                                    }}
+                                                                    className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all ${isExamSaving ? 'bg-green-500/20 text-green-500' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+                                                                >
+                                                                    {isExamSaving ? 'Saved!' : 'Save Prompt'}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="h-px bg-border-subtle my-2" />
+
 
                                                 {/* Version */}
                                                 <div className="flex items-start justify-between gap-4">
@@ -2399,7 +2505,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                     setProfileStatus(prev => ({ ...prev, profileMode: false }));
                 }}
             />
-        </AnimatePresence >
+        </AnimatePresence>
     );
 };
 

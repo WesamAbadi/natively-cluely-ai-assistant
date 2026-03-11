@@ -62,9 +62,14 @@ ANSWER SHAPE: ${intentResult.answerShape}
                 : cleanedTranscript;
 
             // Select prompt based on exam mode
-            const systemPrompt = this.examMode
-                ? EXAM_WHAT_TO_ANSWER_PROMPT
-                : UNIVERSAL_WHAT_TO_ANSWER_PROMPT;
+            let systemPrompt = UNIVERSAL_WHAT_TO_ANSWER_PROMPT;
+            if (this.examMode) {
+                const { CredentialsManager } = require('../services/CredentialsManager');
+                const customPrompt = CredentialsManager.getInstance().getExamModePrompt();
+                systemPrompt = customPrompt && customPrompt.trim().length > 0
+                    ? customPrompt
+                    : EXAM_WHAT_TO_ANSWER_PROMPT;
+            }
 
             yield* this.llmHelper.streamChat(fullMessage, imagePath, undefined, systemPrompt);
 

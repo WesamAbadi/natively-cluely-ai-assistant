@@ -190,6 +190,9 @@ export interface ElectronAPI {
   // Exam Mode
   getExamMode: () => Promise<{ enabled: boolean }>;
   setExamMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+  getExamModePrompt: () => Promise<{ success: boolean; prompt?: string; error?: string }>;
+  getDefaultExamModePrompt: () => Promise<{ success: boolean; prompt?: string; error?: string }>;
+  setExamModePrompt: (prompt: string) => Promise<{ success: boolean; error?: string }>;
   onExamModeChanged: (callback: (enabled: boolean) => void) => () => void;
 
   // Demo

@@ -111,6 +111,9 @@ export class IntelligenceEngine extends EventEmitter {
         this.followUpQuestionsLLM = new FollowUpQuestionsLLM(this.llmHelper);
         this.whatToAnswerLLM = new WhatToAnswerLLM(this.llmHelper);
 
+        const { CredentialsManager } = require('./services/CredentialsManager');
+        this.whatToAnswerLLM.setExamMode(CredentialsManager.getInstance().getExamModeEnabled());
+
         // Sync RecapLLM reference to SessionTracker for epoch compaction
         this.session.setRecapLLM(this.recapLLM);
     }

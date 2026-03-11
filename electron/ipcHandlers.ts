@@ -1527,6 +1527,9 @@ export function initializeIpcHandlers(appState: AppState): void {
       const intelligenceManager = appState.getIntelligenceManager();
       intelligenceManager.setExamMode(!!enabled);
 
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setExamModeEnabled(!!enabled);
+
       // Broadcast to all windows
       BrowserWindow.getAllWindows().forEach(win => {
         if (!win.isDestroyed()) {
@@ -1546,6 +1549,35 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { enabled: intelligenceManager.getExamMode() };
     } catch (error: any) {
       return { enabled: false };
+    }
+  });
+
+  safeHandle("get-exam-mode-prompt", async () => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      const prompt = CredentialsManager.getInstance().getExamModePrompt();
+      return { success: true, prompt };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("get-default-exam-mode-prompt", async () => {
+    try {
+      const { EXAM_WHAT_TO_ANSWER_PROMPT } = require('./llm/prompts');
+      return { success: true, prompt: EXAM_WHAT_TO_ANSWER_PROMPT };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("set-exam-mode-prompt", async (_, promptString: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setExamModePrompt(promptString || '');
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
     }
   });
 

@@ -112,25 +112,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
     // Model Selection State
     const [currentModel, setCurrentModel] = useState<string>('gemini-3-flash-preview');
 
-    // Exam Mode State
-    const [isExamMode, setIsExamMode] = useState(false);
-
-    useEffect(() => {
-        // Fetch initial state
-        if (window.electronAPI?.getExamMode) {
-            window.electronAPI.getExamMode()
-                .then((res: any) => setIsExamMode(res?.enabled || false))
-                .catch(() => { });
-        }
-
-        // Listen for changes
-        if (window.electronAPI?.onExamModeChanged) {
-            const unsubscribe = window.electronAPI.onExamModeChanged((enabled: boolean) => {
-                setIsExamMode(enabled);
-            });
-            return () => unsubscribe();
-        }
-    }, []);
+    // View Control ("queue" vs "solutions") (Optional future expansion)
+    // Currently relying on screen state instead, but could be useful
 
     useEffect(() => {
         // Load the persisted default model (not the runtime model)
@@ -1772,30 +1755,7 @@ Provide only the answer, nothing else.`;
 
                                         <div className="w-px h-3 bg-white/10 mx-1" />
 
-                                        {/* Exam Mode Toggle */}
-                                        <button
-                                            onClick={() => {
-                                                const newState = !isExamMode;
-                                                setIsExamMode(newState);
-                                                window.electronAPI.setExamMode(newState);
-                                            }}
-                                            className={`
-                                                flex items-center gap-1.5 px-3 py-1.5 
-                                                border border-white/10 rounded-lg transition-colors 
-                                                text-xs font-medium 
-                                                interaction-base interaction-press
-                                                ${isExamMode ? 'bg-[#007AFF]/20 text-[#007AFF] border-[#007AFF]/30' : 'bg-black/20 text-white/70 hover:bg-white/5 hover:text-white'}
-                                            `}
-                                            title={isExamMode ? "Exam Mode Enabled (Project Context & Stats Learning)" : "Enable Exam Mode"}
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
-                                                <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                                                <path d="M6 12v5c3 3 9 3 12 0v-5" />
-                                            </svg>
-                                            <span className="hidden sm:inline">Exam</span>
-                                        </button>
 
-                                        <div className="w-px h-3 bg-white/10 mx-1" />
 
                                         {/* Settings Gear */}
                                         <div className="relative">
