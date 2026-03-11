@@ -209,6 +209,10 @@ export class SessionTracker {
             }
         }
 
+        if (segment.speaker === 'user' && (Math.random() < 0.05 || segment.final)) {
+            console.log(`[SessionTracker] RX User Segment: Final=${segment.final} Text="${segment.text.substring(0, 50)}..."`);
+        }
+
         return this.addTranscript(segment);
     }
 

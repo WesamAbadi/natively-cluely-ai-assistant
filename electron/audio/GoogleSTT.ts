@@ -16,6 +16,8 @@ export class GoogleSTT extends EventEmitter {
     private client: SpeechClient;
     private stream: any = null; // Stream type is complex in google-cloud libs
     private isStreaming = false;
+    private keepAliveTimer: NodeJS.Timeout | null = null;
+    private lastWriteAt = 0;
 
     // Config
     private encoding = 'LINEAR16' as const;
@@ -75,12 +77,7 @@ export class GoogleSTT extends EventEmitter {
     private pendingLanguageChange?: NodeJS.Timeout;
 
     public setRecognitionLanguage(key: string): void {
-        // Debounce to prevent rapid restarts (e.g. scrolling through list)
-        if (this.pendingLanguageChange) {
-            clearTimeout(this.pendingLanguageChange);
-        }
-
-        this.pendingLanguageChange = setTimeout(() => {
+        const applyLanguage = () => {
             const config = RECOGNITION_LANGUAGES[key];
             if (!config) {
                 console.warn(`[GoogleSTT] Unknown language key: ${key}`);
@@ -89,10 +86,7 @@ export class GoogleSTT extends EventEmitter {
 
             console.log(`[GoogleSTT] Updating recognition language to: ${key} (${config.bcp47})`);
 
-            // Update state
             this.languageCode = config.bcp47;
-            
-            // Handle variants (English specifically)
             if ('alternates' in config) {
                 this.alternativeLanguageCodes = (config as EnglishVariant).alternates;
             } else {
@@ -104,13 +98,29 @@ export class GoogleSTT extends EventEmitter {
                 console.log('[GoogleSTT] Alternates:', this.alternativeLanguageCodes.join(', '));
             }
 
-            // Restart if streaming
             if (this.isStreaming) {
                 console.log('[GoogleSTT] Language changed while streaming. Restarting stream...');
                 this.stop();
                 this.start();
             }
+        };
 
+        // Apply immediately when idle to avoid delayed restart race at meeting start.
+        if (!this.isStreaming) {
+            if (this.pendingLanguageChange) {
+                clearTimeout(this.pendingLanguageChange);
+                this.pendingLanguageChange = undefined;
+            }
+            applyLanguage();
+            return;
+        }
+
+        // Debounce while streaming to avoid rapid restarts from UI changes.
+        if (this.pendingLanguageChange) {
+            clearTimeout(this.pendingLanguageChange);
+        }
+        this.pendingLanguageChange = setTimeout(() => {
+            applyLanguage();
             this.pendingLanguageChange = undefined;
         }, 250);
     }
@@ -127,6 +137,10 @@ export class GoogleSTT extends EventEmitter {
 
         console.log('[GoogleSTT] Stopping stream...');
         this.isStreaming = false;
+        if (this.keepAliveTimer) {
+            clearInterval(this.keepAliveTimer);
+            this.keepAliveTimer = null;
+        }
         if (this.stream) {
             this.stream.end();
             this.stream.destroy();
@@ -162,8 +176,10 @@ export class GoogleSTT extends EventEmitter {
 
             if (this.stream.command && this.stream.command.writable) {
                 this.stream.write(audioData);
+                this.lastWriteAt = Date.now();
             } else if (this.stream.writable) {
                 this.stream.write(audioData);
+                this.lastWriteAt = Date.now();
             } else {
                 console.warn('[GoogleSTT] Stream not writable!');
             }
@@ -181,6 +197,7 @@ export class GoogleSTT extends EventEmitter {
             if (data) {
                 try {
                     this.stream.write(data);
+                    this.lastWriteAt = Date.now();
                 } catch (e) {
                     console.error('[GoogleSTT] Failed to flush buffer chunk:', e);
                 }
@@ -191,6 +208,7 @@ export class GoogleSTT extends EventEmitter {
     private startStream(): void {
         this.isStreaming = true;
         this.isConnecting = true;
+        this.lastWriteAt = Date.now();
 
         this.stream = this.client
             .streamingRecognize({
@@ -234,7 +252,32 @@ export class GoogleSTT extends EventEmitter {
         // We can flush immediately after creation.
         this.isConnecting = false;
         this.flushBuffer();
+        this.startKeepAlive();
 
         console.log('[GoogleSTT] Stream created. Waiting for events...');
+    }
+
+    private startKeepAlive(): void {
+        if (this.keepAliveTimer) {
+            clearInterval(this.keepAliveTimer);
+        }
+
+        const silenceFrame = Buffer.alloc(640); // 20ms @ 16kHz mono 16-bit
+        this.keepAliveTimer = setInterval(() => {
+            if (!this.isStreaming || !this.stream) return;
+            if (Date.now() - this.lastWriteAt < 1200) return;
+
+            try {
+                if (this.stream.command && this.stream.command.writable) {
+                    this.stream.write(silenceFrame);
+                    this.lastWriteAt = Date.now();
+                } else if (this.stream.writable) {
+                    this.stream.write(silenceFrame);
+                    this.lastWriteAt = Date.now();
+                }
+            } catch {
+                // Stream errors are handled by existing error listener.
+            }
+        }, 500);
     }
 }

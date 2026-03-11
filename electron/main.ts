@@ -477,6 +477,97 @@ export class AppState {
   private audioTestCapture: MicrophoneCapture | null = null; // For audio settings test
   private googleSTT: GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT | null = null; // Interviewer
   private googleSTT_User: GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT | null = null; // User
+  private preferredInputDeviceId: string | undefined;
+  private preferredOutputDeviceId: string | undefined;
+  private isAudioRecoveryInProgress: boolean = false;
+  private lastAudioRecoveryAt: number = 0;
+  private lastSystemAudioChunkAt: number = 0;
+  private lastMicAudioChunkAt: number = 0;
+  private hasSystemAudioFlowed: boolean = false;
+  private hasMicAudioFlowed: boolean = false;
+  private audioHealthMonitorTimer: NodeJS.Timeout | null = null;
+
+  private broadcastNativeAudioEvent(channel: 'native-audio-connected' | 'native-audio-disconnected'): void {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send(channel);
+      }
+    });
+  }
+
+  private startAudioHealthMonitor(): void {
+    this.stopAudioHealthMonitor();
+    this.lastSystemAudioChunkAt = Date.now();
+    this.lastMicAudioChunkAt = Date.now();
+    this.hasSystemAudioFlowed = false;
+    this.hasMicAudioFlowed = false;
+
+    this.audioHealthMonitorTimer = setInterval(() => {
+      if (!this.isMeetingActive || this.isAudioRecoveryInProgress) return;
+
+      const now = Date.now();
+      const systemStalled = this.hasSystemAudioFlowed && (now - this.lastSystemAudioChunkAt > 45000);
+      const micStalled = now - this.lastMicAudioChunkAt > 15000;
+
+      if (systemStalled || micStalled) {
+        const reason = [
+          systemStalled ? 'system audio stalled' : null,
+          micStalled ? 'microphone audio stalled' : null
+        ].filter(Boolean).join(' + ');
+        void this.recoverAudioPipeline(reason);
+      }
+    }, 5000);
+  }
+
+  private stopAudioHealthMonitor(): void {
+    if (this.audioHealthMonitorTimer) {
+      clearInterval(this.audioHealthMonitorTimer);
+      this.audioHealthMonitorTimer = null;
+    }
+  }
+
+  private async recoverAudioPipeline(reason: string): Promise<void> {
+    if (!this.isMeetingActive) return;
+
+    const now = Date.now();
+    if (this.isAudioRecoveryInProgress) return;
+    if (now - this.lastAudioRecoveryAt < 5000) return;
+
+    this.isAudioRecoveryInProgress = true;
+    this.lastAudioRecoveryAt = now;
+    console.warn(`[Main] Recovering audio pipeline: ${reason}`);
+
+    try {
+      this.systemAudioCapture?.stop();
+      this.microphoneCapture?.stop();
+      this.googleSTT?.stop();
+      this.googleSTT_User?.stop();
+
+      this.googleSTT?.removeAllListeners();
+      this.googleSTT_User?.removeAllListeners();
+
+      this.systemAudioCapture = null;
+      this.microphoneCapture = null;
+      this.googleSTT = null;
+      this.googleSTT_User = null;
+
+      await this.reconfigureAudio(this.preferredInputDeviceId, this.preferredOutputDeviceId);
+      this.setupSystemAudioPipeline();
+
+      this.systemAudioCapture?.start();
+      this.googleSTT?.start();
+      this.microphoneCapture?.start();
+      this.googleSTT_User?.start();
+
+      this.lastSystemAudioChunkAt = Date.now();
+      this.lastMicAudioChunkAt = Date.now();
+      this.broadcastNativeAudioEvent('native-audio-connected');
+    } catch (err) {
+      console.error('[Main] Audio recovery failed:', err);
+    } finally {
+      this.isAudioRecoveryInProgress = false;
+    }
+  }
 
   private createSTTProvider(speaker: 'interviewer' | 'user'): GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT {
     const { CredentialsManager } = require('./services/CredentialsManager');
@@ -580,6 +671,12 @@ export class AppState {
         return;
       }
 
+      if (speaker === 'interviewer') {
+        this.lastSystemAudioChunkAt = Date.now();
+      } else {
+        this.lastMicAudioChunkAt = Date.now();
+      }
+
       this.intelligenceManager.handleTranscript({
         speaker: speaker,
         text: segment.text,
@@ -613,6 +710,7 @@ export class AppState {
 
     stt.on('error', (err: Error) => {
       console.error(`[Main] STT (${speaker}) Error:`, err);
+      void this.recoverAudioPipeline(`stt ${speaker} error: ${err.message || err}`);
     });
 
     return stt;
@@ -625,24 +723,30 @@ export class AppState {
       // 1. Initialize Captures if missing
       // If they already exist (e.g. from reconfigureAudio), they are already wired to write to this.googleSTT/User
       if (!this.systemAudioCapture) {
-        this.systemAudioCapture = new SystemAudioCapture();
+        this.systemAudioCapture = new SystemAudioCapture(this.preferredOutputDeviceId || undefined);
         // Wire Capture -> STT
         this.systemAudioCapture.on('data', (chunk: Buffer) => {
+          this.lastSystemAudioChunkAt = Date.now();
+          this.hasSystemAudioFlowed = true;
           this.googleSTT?.write(chunk);
         });
         this.systemAudioCapture.on('error', (err: Error) => {
           console.error('[Main] SystemAudioCapture Error:', err);
+          void this.recoverAudioPipeline(`system capture error: ${err.message || err}`);
         });
       }
 
       if (!this.microphoneCapture) {
-        this.microphoneCapture = new MicrophoneCapture();
+        this.microphoneCapture = new MicrophoneCapture(this.preferredInputDeviceId || undefined);
         // Wire Capture -> STT
         this.microphoneCapture.on('data', (chunk: Buffer) => {
+          this.lastMicAudioChunkAt = Date.now();
+          this.hasMicAudioFlowed = true;
           this.googleSTT_User?.write(chunk);
         });
         this.microphoneCapture.on('error', (err: Error) => {
           console.error('[Main] MicrophoneCapture Error:', err);
+          void this.recoverAudioPipeline(`microphone capture error: ${err.message || err}`);
         });
       }
 
@@ -683,6 +787,8 @@ export class AppState {
 
   private async reconfigureAudio(inputDeviceId?: string, outputDeviceId?: string): Promise<void> {
     console.log(`[Main] Reconfiguring Audio: Input=${inputDeviceId}, Output=${outputDeviceId}`);
+    this.preferredInputDeviceId = inputDeviceId || undefined;
+    this.preferredOutputDeviceId = outputDeviceId || undefined;
 
     // 1. System Audio (Output Capture)
     if (this.systemAudioCapture) {
@@ -699,10 +805,13 @@ export class AppState {
 
       this.systemAudioCapture.on('data', (chunk: Buffer) => {
         // console.log('[Main] SysAudio chunk', chunk.length);
+        this.lastSystemAudioChunkAt = Date.now();
+        this.hasSystemAudioFlowed = true;
         this.googleSTT?.write(chunk);
       });
       this.systemAudioCapture.on('error', (err: Error) => {
         console.error('[Main] SystemAudioCapture Error:', err);
+        void this.recoverAudioPipeline(`system capture error: ${err.message || err}`);
       });
       console.log('[Main] SystemAudioCapture initialized.');
     } catch (err) {
@@ -714,10 +823,13 @@ export class AppState {
         this.googleSTT?.setSampleRate(rate);
 
         this.systemAudioCapture.on('data', (chunk: Buffer) => {
+          this.lastSystemAudioChunkAt = Date.now();
+          this.hasSystemAudioFlowed = true;
           this.googleSTT?.write(chunk);
         });
         this.systemAudioCapture.on('error', (err: Error) => {
           console.error('[Main] SystemAudioCapture (Default) Error:', err);
+          void this.recoverAudioPipeline(`system capture default error: ${err.message || err}`);
         });
       } catch (err2) {
         console.error('[Main] Failed to initialize SystemAudioCapture (Default):', err2);
@@ -739,10 +851,13 @@ export class AppState {
 
       this.microphoneCapture.on('data', (chunk: Buffer) => {
         // console.log('[Main] Mic chunk', chunk.length);
+        this.lastMicAudioChunkAt = Date.now();
+        this.hasMicAudioFlowed = true;
         this.googleSTT_User?.write(chunk);
       });
       this.microphoneCapture.on('error', (err: Error) => {
         console.error('[Main] MicrophoneCapture Error:', err);
+        void this.recoverAudioPipeline(`microphone capture error: ${err.message || err}`);
       });
       console.log('[Main] MicrophoneCapture initialized.');
     } catch (err) {
@@ -754,10 +869,13 @@ export class AppState {
         this.googleSTT_User?.setSampleRate(rate);
 
         this.microphoneCapture.on('data', (chunk: Buffer) => {
+          this.lastMicAudioChunkAt = Date.now();
+          this.hasMicAudioFlowed = true;
           this.googleSTT_User?.write(chunk);
         });
         this.microphoneCapture.on('error', (err: Error) => {
           console.error('[Main] MicrophoneCapture (Default) Error:', err);
+          void this.recoverAudioPipeline(`microphone capture default error: ${err.message || err}`);
         });
       } catch (err2) {
         console.error('[Main] Failed to initialize MicrophoneCapture (Default):', err2);
@@ -805,13 +923,8 @@ export class AppState {
       this.audioTestCapture = new MicrophoneCapture(deviceId || undefined);
       this.audioTestCapture.start();
 
-      // Send to settings window if open, else main window
-      const win = this.settingsWindowHelper.getSettingsWindow() || this.getMainWindow();
-
       this.audioTestCapture.on('data', (chunk: Buffer) => {
         // Calculate basic RMS for level meter
-        if (!win || win.isDestroyed()) return;
-
         let sum = 0;
         const step = 10;
         const len = chunk.length;
@@ -826,7 +939,12 @@ export class AppState {
           const rms = Math.sqrt(sum / count);
           // Normalize 0-1 (heuristic scaling, max comfortable mic input is around 10000-20000)
           const level = Math.min(rms / 10000, 1.0);
-          win.webContents.send('audio-level', level);
+          BrowserWindow.getAllWindows().forEach((win) => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('audio-level', level);
+              win.webContents.send('audio-test-level', level);
+            }
+          });
         }
       });
 
@@ -885,11 +1003,8 @@ export class AppState {
     this.microphoneCapture?.start();
     this.googleSTT_User?.start();
 
-    BrowserWindow.getAllWindows().forEach((win) => {
-      if (!win.isDestroyed()) {
-        win.webContents.send('native-audio-connected');
-      }
-    });
+    this.startAudioHealthMonitor();
+    this.broadcastNativeAudioEvent('native-audio-connected');
 
     // 5. Start JIT RAG live indexing
     if (this.ragManager) {
@@ -909,11 +1024,8 @@ export class AppState {
     this.microphoneCapture?.stop();
     this.googleSTT_User?.stop();
 
-    BrowserWindow.getAllWindows().forEach((win) => {
-      if (!win.isDestroyed()) {
-        win.webContents.send('native-audio-disconnected');
-      }
-    });
+    this.stopAudioHealthMonitor();
+    this.broadcastNativeAudioEvent('native-audio-disconnected');
 
     // 4b. Stop JIT RAG live indexing (flush remaining segments)
     if (this.ragManager) {

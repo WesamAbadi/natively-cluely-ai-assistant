@@ -45,10 +45,35 @@ pub struct MicrophoneStream {
 }
 
 impl MicrophoneStream {
-    pub fn new(_device_id: Option<String>) -> Result<Self> {
+    pub fn new(device_id: Option<String>) -> Result<Self> {
         let host = cpal::default_host();
-        let device = host.default_input_device()
-            .ok_or_else(|| anyhow::anyhow!("No input device found"))?;
+        let requested = device_id.unwrap_or_else(|| "default".to_string());
+        let device = if requested == "default" {
+            host.default_input_device()
+                .ok_or_else(|| anyhow::anyhow!("No input device found"))?
+        } else {
+            let mut matched = None;
+            if let Ok(devices) = host.input_devices() {
+                for d in devices {
+                    if let Ok(name) = d.name() {
+                        if name == requested {
+                            matched = Some(d);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(d) = matched {
+                d
+            } else {
+                println!(
+                    "[Microphone] Requested input '{}' not found. Falling back to default input.",
+                    requested
+                );
+                host.default_input_device()
+                    .ok_or_else(|| anyhow::anyhow!("No input device found"))?
+            }
+        };
         
         let config = device.default_input_config()
             .map_err(|e| anyhow::anyhow!("Failed to get config: {}", e))?;
@@ -161,7 +186,13 @@ fn build_input_stream(
                     // REAL-TIME SAFE: Only lock-free push
                     if channels > 1 {
                         for chunk in data.chunks(channels) {
-                            let _ = producer.try_push(chunk[0]);
+                            if chunk.is_empty() {
+                                continue;
+                            }
+                            // Mix all channels to mono. Some devices expose voice on non-zero channels.
+                            let sum: f32 = chunk.iter().copied().sum();
+                            let mixed = sum / chunk.len() as f32;
+                            let _ = producer.try_push(mixed);
                         }
                     } else {
                         let _ = producer.push_slice(data);
@@ -188,8 +219,13 @@ fn build_input_stream(
                     // REAL-TIME SAFE: Convert and push
                     if channels > 1 {
                         for chunk in data.chunks(channels) {
-                            let sample = chunk[0] as f32 / 32768.0;
-                            let _ = producer.try_push(sample);
+                            if chunk.is_empty() {
+                                continue;
+                            }
+                            // Mix all channels to mono. Some devices expose voice on non-zero channels.
+                            let sum: f32 = chunk.iter().map(|&s| s as f32 / 32768.0).sum();
+                            let mixed = sum / chunk.len() as f32;
+                            let _ = producer.try_push(mixed);
                         }
                     } else {
                         for &sample in data {
@@ -218,8 +254,13 @@ fn build_input_stream(
                     // REAL-TIME SAFE: Convert and push
                     if channels > 1 {
                         for chunk in data.chunks(channels) {
-                            let sample = chunk[0] as f32 / 2147483648.0;
-                            let _ = producer.try_push(sample);
+                            if chunk.is_empty() {
+                                continue;
+                            }
+                            // Mix all channels to mono. Some devices expose voice on non-zero channels.
+                            let sum: f32 = chunk.iter().map(|&s| s as f32 / 2147483648.0).sum();
+                            let mixed = sum / chunk.len() as f32;
+                            let _ = producer.try_push(mixed);
                         }
                     } else {
                         for &sample in data {

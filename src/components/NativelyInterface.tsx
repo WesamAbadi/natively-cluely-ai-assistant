@@ -88,6 +88,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
 
     const [rollingTranscript, setRollingTranscript] = useState('');  // For interviewer rolling text bar
     const [isInterviewerSpeaking, setIsInterviewerSpeaking] = useState(false);  // Track if actively speaking
+    const [userRollingTranscript, setUserRollingTranscript] = useState('');  // For user mic rolling text bar
+    const [isUserSpeaking, setIsUserSpeaking] = useState(false);  // Track if actively speaking
     const [voiceInput, setVoiceInput] = useState('');  // Accumulated user voice input
     const voiceInputRef = useRef<string>('');  // Ref for capturing in async handlers
     const textInputRef = useRef<HTMLInputElement>(null); // Ref for input focus
@@ -274,6 +276,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
             setAttachedContext(null);
             setManualTranscript('');
             setVoiceInput('');
+            setRollingTranscript('');
+            setUserRollingTranscript('');
+            setIsInterviewerSpeaking(false);
+            setIsUserSpeaking(false);
             setIsProcessing(false);
             // Optionally reset connection status if needed, but connection persists
 
@@ -327,10 +333,20 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
                 return;  // Don't add to messages while recording
             }
 
-            // Ignore user mic transcripts when not recording
-            // Only interviewer (system audio) transcripts should appear in chat
+            // When not actively recording answer input, still surface mic transcript in rolling bar.
             if (transcript.speaker === 'user') {
-                return;  // Skip user mic input - only relevant when Answer button is active
+                setIsUserSpeaking(!transcript.final);
+                if (transcript.final) {
+                    setUserRollingTranscript(prev => {
+                        const separator = prev ? '  ·  ' : '';
+                        return prev + separator + transcript.text;
+                    });
+
+                    setTimeout(() => {
+                        setIsUserSpeaking(false);
+                    }, 3000);
+                }
+                return;
             }
 
             // Only show interviewer (system audio) transcripts in rolling bar
@@ -1471,6 +1487,11 @@ Provide only the answer, nothing else.`;
         return () => window.removeEventListener('keydown', handleGeneralKeyDown);
     }, [isShortcutPressed]);
 
+    const combinedRollingTranscript = [
+        rollingTranscript ? `Them: ${rollingTranscript}` : '',
+        userRollingTranscript ? `You: ${userRollingTranscript}` : ''
+    ].filter(Boolean).join('   |   ');
+
     return (
         <div ref={contentRef} className="flex flex-col items-center w-fit mx-auto h-fit min-h-0 bg-transparent p-0 rounded-[24px] font-sans text-slate-200 gap-2">
 
@@ -1503,11 +1524,11 @@ Provide only the answer, nothing else.`;
 
 
 
-                            {/* Rolling Transcript Bar - Single-line interviewer speech */}
-                            {(rollingTranscript || isInterviewerSpeaking) && showTranscript && (
+                            {/* Rolling Transcript Bar - Interviewer + user speech */}
+                            {(combinedRollingTranscript || isInterviewerSpeaking || isUserSpeaking) && showTranscript && (
                                 <RollingTranscript
-                                    text={rollingTranscript}
-                                    isActive={isInterviewerSpeaking}
+                                    text={combinedRollingTranscript}
+                                    isActive={isInterviewerSpeaking || isUserSpeaking}
                                 />
                             )}
 
@@ -1591,7 +1612,7 @@ Provide only the answer, nothing else.`;
                             )}
 
                             {/* Quick Actions - Minimal & Clean */}
-                            <div className={`flex flex-nowrap justify-center items-center gap-1.5 px-4 pb-3 overflow-x-hidden ${rollingTranscript && showTranscript ? 'pt-1' : 'pt-3'}`}>
+                            <div className={`flex flex-nowrap justify-center items-center gap-1.5 px-4 pb-3 overflow-x-hidden ${combinedRollingTranscript && showTranscript ? 'pt-1' : 'pt-3'}`}>
                                 <button onClick={handleWhatToSay} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium text-slate-400 bg-white/5 border border-white/0 hover:text-slate-200 hover:bg-white/10 hover:border-white/5 transition-all active:scale-95 duration-200 interaction-base interaction-press whitespace-nowrap shrink-0">
                                     <Pencil className="w-3 h-3 opacity-70" /> What to answer?
                                 </button>

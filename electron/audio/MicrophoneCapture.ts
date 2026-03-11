@@ -24,14 +24,7 @@ export class MicrophoneCapture extends EventEmitter {
         if (!RustMicCapture) {
             console.error('[MicrophoneCapture] Rust class implementation not found.');
         } else {
-            console.log(`[MicrophoneCapture] Initialized wrapper. Device ID: ${this.deviceId || 'default'}`);
-            try {
-                console.log('[MicrophoneCapture] Creating native monitor (Eager Init)...');
-                this.monitor = new RustMicCapture(this.deviceId);
-            } catch (e) {
-                console.error('[MicrophoneCapture] Failed to create native monitor:', e);
-                // We don't throw here to allow app to start, but start() will fail
-            }
+            console.log(`[MicrophoneCapture] Initialized (lazy). Device ID: ${this.deviceId || 'default'}`);
         }
     }
 
@@ -51,10 +44,8 @@ export class MicrophoneCapture extends EventEmitter {
             return;
         }
 
-        // Monitor should be ready from constructor
-        // Monitor should be ready from constructor
         if (!this.monitor) {
-            console.log('[MicrophoneCapture] Monitor not initialized. Re-initializing...');
+            console.log('[MicrophoneCapture] Creating native monitor (lazy init)...');
             try {
                 this.monitor = new RustMicCapture(this.deviceId);
             } catch (e) {
@@ -97,8 +88,8 @@ export class MicrophoneCapture extends EventEmitter {
             console.error('[MicrophoneCapture] Error stopping:', e);
         }
 
-        // DO NOT destroy monitor here. Keep it alive for seamless restart.
-        // this.monitor = null; 
+        // Native mic stream consumer is one-shot; recreate monitor for next start.
+        this.monitor = null;
 
         this.isRecording = false;
         this.emit('stop');

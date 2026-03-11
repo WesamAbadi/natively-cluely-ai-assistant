@@ -65,12 +65,14 @@ impl SilenceSuppressionConfig {
     /// Create config for microphone (standard)
     pub fn for_microphone() -> Self {
         Self {
-            speech_threshold_rms: 100.0,
-            speech_hangover: Duration::from_millis(200),
+            // More permissive than system default to avoid clipping low-level speech
+            // from laptop mic arrays and beamforming devices.
+            speech_threshold_rms: 70.0,
+            speech_hangover: Duration::from_millis(300),
             silence_keepalive_interval: Duration::from_millis(100),
-            adaptive_multiplier: 3.0,
-            adaptive_min_floor: 20.0,
-            ema_alpha: 0.02,
+            adaptive_multiplier: 2.2,
+            adaptive_min_floor: 8.0,
+            ema_alpha: 0.01,
         }
     }
 }

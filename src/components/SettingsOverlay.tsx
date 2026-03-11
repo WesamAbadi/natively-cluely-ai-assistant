@@ -694,12 +694,6 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
     const [calendarStatus, setCalendarStatus] = useState<{ connected: boolean; email?: string }>({ connected: false });
     const [isCalendarsLoading, setIsCalendarsLoading] = useState(false);
 
-    const audioContextRef = React.useRef<AudioContext | null>(null);
-    const analyserRef = React.useRef<AnalyserNode | null>(null);
-    const sourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
-    const rafRef = React.useRef<number | null>(null);
-    const streamRef = React.useRef<MediaStream | null>(null);
-
     // Load stored credentials on mount
 
 
@@ -811,113 +805,38 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
         }
     }, [isOpen, selectedInput, selectedOutput]); // Re-run if isOpen changes, or if selected devices are cleared
 
-    // Effect for real-time audio level monitoring
+    // Native mic-level monitor (same capture path used for transcription)
     useEffect(() => {
-        if (isOpen && activeTab === 'audio') {
-            let mounted = true;
-
-            const startAudio = async () => {
-                try {
-                    // Cleanup previous audio context if it exists
-                    if (audioContextRef.current) {
-                        audioContextRef.current.close();
-                    }
-
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            deviceId: selectedInput ? { exact: selectedInput } : undefined
-                        }
-                    });
-
-                    streamRef.current = stream;
-
-                    if (!mounted) return;
-
-                    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-                    const analyser = audioContext.createAnalyser();
-                    const source = audioContext.createMediaStreamSource(stream);
-
-                    analyser.fftSize = 256;
-                    source.connect(analyser);
-
-                    audioContextRef.current = audioContext;
-                    analyserRef.current = analyser;
-                    sourceRef.current = source;
-
-                    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                    let smoothLevel = 0;
-
-                    const updateLevel = () => {
-                        if (!mounted || !analyserRef.current) return;
-                        // Use Time Domain Data for accurate volume (waveform) instead of frequency
-                        analyserRef.current.getByteTimeDomainData(dataArray);
-
-                        let sum = 0;
-                        for (let i = 0; i < dataArray.length; i++) {
-                            // Convert 0-255 to -1 to 1 range
-                            const value = (dataArray[i] - 128) / 128;
-                            sum += value * value;
-                        }
-
-                        // Calculate RMS
-                        const rms = Math.sqrt(sum / dataArray.length);
-
-                        // Convert to simpler 0-100 range with some boost
-                        // RMS is usually very small (0.01 - 0.5 for normal speech)
-                        // Logarithmic scaling feels more natural for volume
-                        const db = 20 * Math.log10(rms);
-                        // Approximate mapping: -60dB (silence) to 0dB (max) -> 0 to 100
-                        const targetLevel = Math.max(0, Math.min(100, (db + 60) * 2));
-
-                        // Apply smoothing
-                        if (targetLevel > smoothLevel) {
-                            smoothLevel = smoothLevel * 0.7 + targetLevel * 0.3; // Fast attack
-                        } else {
-                            smoothLevel = smoothLevel * 0.95 + targetLevel * 0.05; // Slow decay
-                        }
-
-                        setMicLevel(smoothLevel);
-
-                        rafRef.current = requestAnimationFrame(updateLevel);
-                    };
-
-                    updateLevel();
-                } catch (error) {
-                    console.error("Error accessing microphone:", error);
-                    setMicLevel(0); // Reset level on error
-                }
-            };
-
-            startAudio();
-
-            return () => {
-                mounted = false;
-                if (rafRef.current) cancelAnimationFrame(rafRef.current);
-                if (sourceRef.current) sourceRef.current.disconnect();
-                if (audioContextRef.current) {
-                    audioContextRef.current.close();
-                    audioContextRef.current = null;
-                }
-                if (streamRef.current) {
-                    streamRef.current.getTracks().forEach(track => track.stop());
-                    streamRef.current = null;
-                }
-                setMicLevel(0); // Reset mic level on cleanup
-            };
-        } else {
-            // Cleanup when closing tab or overlay or switching away from audio tab
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
-            if (sourceRef.current) sourceRef.current.disconnect(); // Disconnect source as well
-            if (audioContextRef.current) {
-                audioContextRef.current.close();
-                audioContextRef.current = null;
-            }
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => track.stop());
-                streamRef.current = null;
-            }
+        if (!(isOpen && activeTab === 'audio')) {
             setMicLevel(0);
+            return;
         }
+
+        let mounted = true;
+        let smoothLevel = 0;
+
+        const unsubscribe = window.electronAPI?.onAudioTestLevel?.((level: number) => {
+            if (!mounted) return;
+            const target = Math.max(0, Math.min(100, level * 100));
+            if (target > smoothLevel) {
+                smoothLevel = smoothLevel * 0.7 + target * 0.3;
+            } else {
+                smoothLevel = smoothLevel * 0.9 + target * 0.1;
+            }
+            setMicLevel(smoothLevel);
+        });
+
+        window.electronAPI?.startAudioTest?.(selectedInput || undefined).catch((err: any) => {
+            console.error('Failed to start native audio test:', err);
+            setMicLevel(0);
+        });
+
+        return () => {
+            mounted = false;
+            unsubscribe?.();
+            window.electronAPI?.stopAudioTest?.().catch(() => { });
+            setMicLevel(0);
+        };
     }, [isOpen, activeTab, selectedInput]);
 
     return (

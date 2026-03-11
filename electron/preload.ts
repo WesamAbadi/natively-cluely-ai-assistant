@@ -738,8 +738,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onAudioTestLevel: (callback: (level: number) => void) => {
     const subscription = (_: any, level: number) => callback(level)
     ipcRenderer.on('audio-test-level', subscription)
+    ipcRenderer.on('audio-level', subscription) // Backward compatibility channel
     return () => {
       ipcRenderer.removeListener('audio-test-level', subscription)
+      ipcRenderer.removeListener('audio-level', subscription)
     }
   },
 
