@@ -1521,6 +1521,34 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
 
+  // Exam Mode Toggle
+  safeHandle("set-exam-mode", async (_, enabled: boolean) => {
+    try {
+      const intelligenceManager = appState.getIntelligenceManager();
+      intelligenceManager.setExamMode(!!enabled);
+
+      // Broadcast to all windows
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('exam-mode-changed', !!enabled);
+        }
+      });
+
+      return { success: true, enabled: !!enabled };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("get-exam-mode", async () => {
+    try {
+      const intelligenceManager = appState.getIntelligenceManager();
+      return { enabled: intelligenceManager.getExamMode() };
+    } catch (error: any) {
+      return { enabled: false };
+    }
+  });
+
   // Service Account Selection
   safeHandle("select-service-account", async () => {
     try {

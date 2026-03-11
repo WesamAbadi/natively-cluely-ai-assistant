@@ -541,6 +541,21 @@ export class IntelligenceEngine extends EventEmitter {
     }
 
     /**
+     * Toggle exam session mode.
+     * When enabled, WhatToAnswerLLM uses the exam-specific prompt.
+     */
+    setExamMode(enabled: boolean): void {
+        if (this.whatToAnswerLLM) {
+            this.whatToAnswerLLM.setExamMode(enabled);
+        }
+        console.log(`[IntelligenceEngine] Exam mode: ${enabled}`);
+    }
+
+    getExamMode(): boolean {
+        return this.whatToAnswerLLM?.getExamMode() ?? false;
+    }
+
+    /**
      * Reset engine state (cancels any in-flight operations)
      */
     reset(): void {

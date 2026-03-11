@@ -164,6 +164,11 @@ interface ElectronAPI {
   getGroqFastTextMode: () => Promise<{ enabled: boolean }>
   setGroqFastTextMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
 
+  // Exam Mode
+  getExamMode: () => Promise<{ enabled: boolean }>
+  setExamMode: (enabled: boolean) => Promise<{ success: boolean; enabled?: boolean; error?: string }>
+  onExamModeChanged: (callback: (enabled: boolean) => void) => () => void
+
   // Demo
   seedDemo: () => Promise<{ success: boolean }>
 
@@ -717,6 +722,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Groq Fast Text Mode
   getGroqFastTextMode: () => ipcRenderer.invoke('get-groq-fast-text-mode'),
   setGroqFastTextMode: (enabled: boolean) => ipcRenderer.invoke('set-groq-fast-text-mode', enabled),
+
+  // Exam Mode
+  getExamMode: () => ipcRenderer.invoke('get-exam-mode'),
+  setExamMode: (enabled: boolean) => ipcRenderer.invoke('set-exam-mode', enabled),
+  onExamModeChanged: (callback: (enabled: boolean) => void) => {
+    const subscription = (_: any, enabled: boolean) => callback(enabled)
+    ipcRenderer.on('exam-mode-changed', subscription)
+    return () => {
+      ipcRenderer.removeListener('exam-mode-changed', subscription)
+    }
+  },
 
   // Demo
   seedDemo: () => ipcRenderer.invoke('seed-demo'),

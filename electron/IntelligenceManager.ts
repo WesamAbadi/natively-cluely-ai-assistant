@@ -161,6 +161,14 @@ export class IntelligenceManager extends EventEmitter {
     // State Management
     // ============================================
 
+    setExamMode(enabled: boolean): void {
+        this.engine.setExamMode(enabled);
+    }
+
+    getExamMode(): boolean {
+        return this.engine.getExamMode();
+    }
+
     getActiveMode() {
         return this.engine.getActiveMode();
     }

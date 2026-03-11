@@ -187,6 +187,11 @@ export interface ElectronAPI {
   getGroqFastTextMode: () => Promise<{ enabled: boolean }>;
   setGroqFastTextMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
 
+  // Exam Mode
+  getExamMode: () => Promise<{ enabled: boolean }>;
+  setExamMode: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+  onExamModeChanged: (callback: (enabled: boolean) => void) => () => void;
+
   // Demo
   seedDemo: () => Promise<{ success: boolean }>;
 

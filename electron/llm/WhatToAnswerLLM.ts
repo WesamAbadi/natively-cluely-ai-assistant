@@ -1,13 +1,23 @@
 import { LLMHelper } from "../LLMHelper";
-import { UNIVERSAL_WHAT_TO_ANSWER_PROMPT } from "./prompts";
+import { UNIVERSAL_WHAT_TO_ANSWER_PROMPT, EXAM_WHAT_TO_ANSWER_PROMPT } from "./prompts";
 import { TemporalContext } from "./TemporalContextBuilder";
 import { IntentResult } from "./IntentClassifier";
 
 export class WhatToAnswerLLM {
     private llmHelper: LLMHelper;
+    private examMode: boolean = false;
 
     constructor(llmHelper: LLMHelper) {
         this.llmHelper = llmHelper;
+    }
+
+    setExamMode(enabled: boolean): void {
+        this.examMode = enabled;
+        console.log(`[WhatToAnswerLLM] Exam mode: ${enabled}`);
+    }
+
+    getExamMode(): boolean {
+        return this.examMode;
     }
 
     // Deprecated non-streaming method (redirect to streaming or implement if needed)
@@ -51,11 +61,12 @@ ANSWER SHAPE: ${intentResult.answerShape}
                 ? `${extraContext}\n\nCONVERSATION:\n${cleanedTranscript}`
                 : cleanedTranscript;
 
-            // Use Universal Prompt
-            // Note: WhatToAnswer has a very specific prompt. 
-            // We should use UNIVERSAL_WHAT_TO_ANSWER_PROMPT as override
+            // Select prompt based on exam mode
+            const systemPrompt = this.examMode
+                ? EXAM_WHAT_TO_ANSWER_PROMPT
+                : UNIVERSAL_WHAT_TO_ANSWER_PROMPT;
 
-            yield* this.llmHelper.streamChat(fullMessage, imagePath, undefined, UNIVERSAL_WHAT_TO_ANSWER_PROMPT);
+            yield* this.llmHelper.streamChat(fullMessage, imagePath, undefined, systemPrompt);
 
         } catch (error) {
             console.error("[WhatToAnswerLLM] Stream failed:", error);
