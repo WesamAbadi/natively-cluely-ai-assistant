@@ -154,6 +154,7 @@ impl SpeakerInput {
         match init_result {
             Ok((h_event, render_client, sample_rate, audio_client)) => {
                 let _ = init_tx.send(Ok(sample_rate));
+                let mut consecutive_wait_timeouts: u32 = 0;
                 loop {
                     {
                         let state = waker_state.lock().unwrap();
@@ -164,9 +165,17 @@ impl SpeakerInput {
                     }
 
                     if h_event.wait_for_event(3000).is_err() {
-                        error!("Timeout error, stopping capture");
-                        break;
+                        // Silence is valid; keep loopback alive so interviewer audio can start later.
+                        consecutive_wait_timeouts = consecutive_wait_timeouts.saturating_add(1);
+                        if consecutive_wait_timeouts % 20 == 0 {
+                            eprintln!(
+                                "[SpeakerInput] WASAPI loopback idle for ~{}s (still listening)",
+                                consecutive_wait_timeouts * 3
+                            );
+                        }
+                        continue;
                     }
+                    consecutive_wait_timeouts = 0;
 
                     let mut temp_queue = VecDeque::new();
                     // bytes_per_frame for 32-bit float mono = 4 bytes
