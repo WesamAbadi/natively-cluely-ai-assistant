@@ -20,6 +20,7 @@ export class WindowHelper {
   private launcherWindow: BrowserWindow | null = null
   private overlayWindow: BrowserWindow | null = null
   private isWindowVisible: boolean = false
+  private contentProtectionEnabled: boolean = false
   // Position/Size tracking for Launcher
   private launcherPosition: { x: number; y: number } | null = null
   private launcherSize: { width: number; height: number } | null = null
@@ -41,13 +42,26 @@ export class WindowHelper {
     this.appState = appState
   }
 
+  private applyContentProtectionToWindow(win: BrowserWindow | null): void {
+    if (!win || win.isDestroyed()) return
+
+    win.setContentProtection(this.contentProtectionEnabled)
+
+    // Some platforms/compositors can drop protection while transitioning visibility.
+    // Re-apply shortly after the show cycle when stealth mode is active.
+    if (this.contentProtectionEnabled && win.isVisible()) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          win.setContentProtection(true)
+        }
+      }, 75)
+    }
+  }
+
   public setContentProtection(enable: boolean): void {
-    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-      this.launcherWindow.setContentProtection(enable)
-    }
-    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-      this.overlayWindow.setContentProtection(enable)
-    }
+    this.contentProtectionEnabled = enable
+    this.applyContentProtectionToWindow(this.launcherWindow)
+    this.applyContentProtectionToWindow(this.overlayWindow)
     console.log(`[WindowHelper] Content Protection set to: ${enable}`)
   }
 
@@ -160,7 +174,7 @@ export class WindowHelper {
       return;
     }
 
-    this.launcherWindow.setContentProtection(false)
+    this.applyContentProtectionToWindow(this.launcherWindow)
 
     this.launcherWindow.loadURL(`${startUrl}?window=launcher`)
       .then(() => console.log('[WindowHelper] loadURL success'))
@@ -199,7 +213,7 @@ export class WindowHelper {
     }
 
     this.overlayWindow = new BrowserWindow(overlaySettings)
-    this.overlayWindow.setContentProtection(false)
+    this.applyContentProtectionToWindow(this.overlayWindow)
 
     if (process.platform === "darwin") {
       this.overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -238,6 +252,10 @@ export class WindowHelper {
       }
     })
 
+    this.launcherWindow.on("show", () => {
+      this.applyContentProtectionToWindow(this.launcherWindow)
+    })
+
     this.launcherWindow.on("closed", () => {
       this.launcherWindow = null
       // If launcher closes, we should probably quit app or close overlay
@@ -250,6 +268,10 @@ export class WindowHelper {
 
     // Listen for overlay close if independent closing acts as "Stop Meeting"
     if (this.overlayWindow) {
+      this.overlayWindow.on("show", () => {
+        this.applyContentProtectionToWindow(this.overlayWindow)
+      })
+
       this.overlayWindow.on('close', (e) => {
         // Prevent accidental closing via cmd+w if we want to enforce workflow? 
         // Or treat as end meeting. simpler to treat as hiding for now.
@@ -321,6 +343,7 @@ export class WindowHelper {
 
     // Show Overlay FIRST
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
+      this.applyContentProtectionToWindow(this.overlayWindow);
       // Reset overlay position to center or last known? 
       // For now, center it nicely
       const primaryDisplay = screen.getPrimaryDisplay()
@@ -332,6 +355,7 @@ export class WindowHelper {
       this.overlayWindow.setBounds({ x, y, width: 600, height: 216 });
 
       this.overlayWindow.show();
+      this.applyContentProtectionToWindow(this.overlayWindow);
       this.overlayWindow.focus();
       this.overlayWindow.setAlwaysOnTop(true, "floating");
       this.isWindowVisible = true;
@@ -349,7 +373,9 @@ export class WindowHelper {
 
     // Show Launcher FIRST
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.applyContentProtectionToWindow(this.launcherWindow);
       this.launcherWindow.show();
+      this.applyContentProtectionToWindow(this.launcherWindow);
       this.launcherWindow.focus();
       this.isWindowVisible = true;
 

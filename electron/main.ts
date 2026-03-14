@@ -97,6 +97,7 @@ import { ReleaseNotesManager } from "./update/ReleaseNotesManager"
 
 export class AppState {
   private static instance: AppState | null = null
+  private sttRuntimeFallbackProvider: 'google' | null = null
 
   private windowHelper: WindowHelper
   public settingsWindowHelper: SettingsWindowHelper
@@ -526,6 +527,16 @@ export class AppState {
     }
   }
 
+  private hasGoogleSttAvailable(): boolean {
+    const configuredPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || CredentialsManager.getInstance().getGoogleServiceAccountPath();
+    if (!configuredPath) return false;
+    try {
+      return fs.existsSync(configuredPath);
+    } catch {
+      return false;
+    }
+  }
+
   private async recoverAudioPipeline(reason: string): Promise<void> {
     if (!this.isMeetingActive) return;
 
@@ -575,20 +586,11 @@ export class AppState {
     type SttProviderId = 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox';
     const requestedProvider = cm.getSttProvider() as SttProviderId;
     const sttLanguage = cm.getSttLanguage();
-
-    const hasGoogleServiceAccount = (): boolean => {
-      const configuredPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || cm.getGoogleServiceAccountPath();
-      if (!configuredPath) return false;
-      try {
-        return fs.existsSync(configuredPath);
-      } catch {
-        return false;
-      }
-    };
+    const activeProvider = this.sttRuntimeFallbackProvider || requestedProvider;
 
     const createProviderFor = (provider: SttProviderId): GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT | null => {
       if (provider === 'google') {
-        if (!hasGoogleServiceAccount()) {
+        if (!this.hasGoogleSttAvailable()) {
           return null;
         }
         console.log(`[Main] Using GoogleSTT for ${speaker}`);
@@ -633,34 +635,25 @@ export class AppState {
       return new RestSTT(provider, apiKey, modelOverride, region);
     };
 
-    const providerOrder: SttProviderId[] = [
-      requestedProvider,
-      'soniox',
-      'deepgram',
-      'groq',
-      'openai',
-      'elevenlabs',
-      'azure',
-      'ibmwatson',
-      'google'
-    ].filter((provider, index, all) => all.indexOf(provider) === index) as SttProviderId[];
-
-    let stt: GoogleSTT | RestSTT | DeepgramStreamingSTT | SonioxStreamingSTT | null = null;
-    let resolvedProvider: SttProviderId = requestedProvider;
-    for (const provider of providerOrder) {
-      stt = createProviderFor(provider);
-      if (stt) {
-        resolvedProvider = provider;
-        break;
-      }
+    let stt = createProviderFor(activeProvider);
+    if (!stt && activeProvider !== 'google' && this.hasGoogleSttAvailable()) {
+      console.warn(`[Main] Requested STT provider "${activeProvider}" is unavailable. Falling back to "google".`);
+      this.sttRuntimeFallbackProvider = 'google';
+      stt = createProviderFor('google');
     }
 
     if (!stt) {
-      console.error('[Main] No valid STT provider credentials found. Falling back to GoogleSTT (may fail without a service account).');
-      stt = new GoogleSTT();
-      resolvedProvider = 'google';
-    } else if (resolvedProvider !== requestedProvider) {
-      console.warn(`[Main] Requested STT provider "${requestedProvider}" is unavailable. Using "${resolvedProvider}" instead.`);
+      const providerHintMap: Record<SttProviderId, string> = {
+        google: 'a valid Google Cloud service account JSON path',
+        groq: 'a Groq STT key or Groq API key',
+        openai: 'an OpenAI STT key or OpenAI API key',
+        deepgram: 'a Deepgram API key',
+        elevenlabs: 'an ElevenLabs API key',
+        azure: 'an Azure Speech API key',
+        ibmwatson: 'an IBM Watson Speech-to-Text API key',
+        soniox: 'a Soniox API key',
+      };
+      throw new Error(`Selected STT provider "${requestedProvider}" is not configured. Expected ${providerHintMap[requestedProvider]}.`);
     }
 
     stt.setRecognitionLanguage(sttLanguage);
@@ -710,6 +703,12 @@ export class AppState {
 
     stt.on('error', (err: Error) => {
       console.error(`[Main] STT (${speaker}) Error:`, err);
+      if (requestedProvider !== 'google' && this.hasGoogleSttAvailable()) {
+        if (this.sttRuntimeFallbackProvider !== 'google') {
+          console.warn(`[Main] STT provider "${requestedProvider}" failed during runtime. Falling back to Google STT.`);
+        }
+        this.sttRuntimeFallbackProvider = 'google';
+      }
       void this.recoverAudioPipeline(`stt ${speaker} error: ${err.message || err}`);
     });
 
@@ -889,6 +888,7 @@ export class AppState {
    */
   public async reconfigureSttProvider(): Promise<void> {
     console.log('[Main] Reconfiguring STT Provider...');
+    this.sttRuntimeFallbackProvider = null;
 
     // Stop existing STT instances
     if (this.googleSTT) {
@@ -979,6 +979,7 @@ export class AppState {
     console.log('[Main] Starting Meeting...', metadata);
 
     this.isMeetingActive = true;
+    this.sttRuntimeFallbackProvider = null;
     if (metadata) {
       this.intelligenceManager.setMeetingMetadata(metadata);
 
@@ -1592,6 +1593,12 @@ export class AppState {
     const launcher = this.windowHelper.getLauncherWindow();
     if (launcher && !launcher.isDestroyed() && launcher !== mainWindow) {
       launcher.webContents.send('undetectable-changed', state);
+    }
+
+    // Ensure overlay renderer state is kept in sync even when launcher is active.
+    const overlay = this.windowHelper.getOverlayWindow();
+    if (overlay && !overlay.isDestroyed() && overlay !== mainWindow) {
+      overlay.webContents.send('undetectable-changed', state);
     }
 
     const settingsWin = this.settingsWindowHelper.getSettingsWindow();
