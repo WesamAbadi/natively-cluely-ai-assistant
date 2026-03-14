@@ -978,6 +978,12 @@ export class AppState {
   public async startMeeting(metadata?: any): Promise<void> {
     console.log('[Main] Starting Meeting...', metadata);
 
+    if (this.isMeetingActive) {
+      console.warn('[Main] startMeeting called while already active. Restoring overlay instead of starting a duplicate session.');
+      this.windowHelper.setWindowMode('overlay');
+      return;
+    }
+
     this.isMeetingActive = true;
     this.sttRuntimeFallbackProvider = null;
     if (metadata) {
@@ -1015,6 +1021,12 @@ export class AppState {
 
   public async endMeeting(): Promise<void> {
     console.log('[Main] Ending Meeting...');
+
+    if (!this.isMeetingActive) {
+      console.log('[Main] endMeeting ignored because no meeting is active.');
+      return;
+    }
+
     this.isMeetingActive = false; // Block new data immediately
 
     // 3. Stop System Audio

@@ -357,6 +357,7 @@ export class ContextBaseManager {
     const maxChars = options?.maxChars ?? MAX_CONTEXT_CHARS;
     const maxChunks = options?.maxChunks ?? MAX_CONTEXT_CHUNKS;
     const includeGeminiFiles = !!options?.includeGeminiFiles;
+    const includeEnabledFileSnippets = !includeGeminiFiles;
     const queryTerms = this.tokenize(query);
     const queryLower = (query || '').toLowerCase();
 
@@ -399,6 +400,34 @@ export class ContextBaseManager {
         text: this.config.manualText.slice(0, Math.min(1_000, maxChars)),
         terms: this.computeTermMap(this.config.manualText),
       });
+    }
+
+    // For providers that cannot consume Gemini file parts (e.g. Groq/OpenAI/Claude),
+    // ensure enabled parsed files still contribute text context even without lexical matches.
+    if (includeEnabledFileSnippets && selectedChunks.length < maxChunks) {
+      const enabledReadyFiles = this.config.files.filter(
+        (file) =>
+          file.enabled &&
+          file.parseStatus === 'ready' &&
+          !!file.extractedText &&
+          file.extractedText.trim().length > 0
+      );
+
+      for (const file of enabledReadyFiles) {
+        if (selectedChunks.length >= maxChunks) break;
+        if (selectedFileIds.includes(file.id)) continue;
+
+        const fallbackChunk = this.chunksCache.find(
+          (chunk) => chunk.sourceType === 'file' && chunk.sourceId === file.id
+        );
+        if (!fallbackChunk) continue;
+
+        if (totalChars + fallbackChunk.text.length > maxChars) continue;
+
+        selectedChunks.push(fallbackChunk);
+        selectedFileIds.push(file.id);
+        totalChars += fallbackChunk.text.length;
+      }
     }
 
     const contextBlock = selectedChunks.length > 0

@@ -58,6 +58,24 @@ export class WindowHelper {
     }
   }
 
+  private ensureOverlayAlwaysOnTop(): void {
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+
+    if (process.platform === "darwin") {
+      this.overlayWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true,
+      })
+      this.overlayWindow.setHiddenInMissionControl(true)
+      this.overlayWindow.setAlwaysOnTop(true, "screen-saver")
+    } else {
+      this.overlayWindow.setAlwaysOnTop(true)
+    }
+
+    // Re-assert z-order because some fullscreen transitions can demote the window.
+    this.overlayWindow.moveTop()
+  }
+
   public setContentProtection(enable: boolean): void {
     this.contentProtectionEnabled = enable
     this.applyContentProtectionToWindow(this.launcherWindow)
@@ -205,6 +223,7 @@ export class WindowHelper {
       transparent: true,
       backgroundColor: "#00000000",
       alwaysOnTop: true,
+      fullscreenable: false,
       focusable: true,
       resizable: false, // Enforce automatic resizing only
       movable: true,
@@ -215,11 +234,7 @@ export class WindowHelper {
     this.overlayWindow = new BrowserWindow(overlaySettings)
     this.applyContentProtectionToWindow(this.overlayWindow)
 
-    if (process.platform === "darwin") {
-      this.overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-      this.overlayWindow.setHiddenInMissionControl(true)
-      this.overlayWindow.setAlwaysOnTop(true, "floating")
-    }
+    this.ensureOverlayAlwaysOnTop()
 
     this.overlayWindow.loadURL(`${startUrl}?window=overlay`).catch(() => { })
 
@@ -270,6 +285,17 @@ export class WindowHelper {
     if (this.overlayWindow) {
       this.overlayWindow.on("show", () => {
         this.applyContentProtectionToWindow(this.overlayWindow)
+        this.ensureOverlayAlwaysOnTop()
+      })
+
+      this.overlayWindow.on("focus", () => {
+        this.ensureOverlayAlwaysOnTop()
+      })
+
+      this.overlayWindow.on("blur", () => {
+        setTimeout(() => {
+          this.ensureOverlayAlwaysOnTop()
+        }, 50)
       })
 
       this.overlayWindow.on('close', (e) => {
@@ -356,8 +382,8 @@ export class WindowHelper {
 
       this.overlayWindow.show();
       this.applyContentProtectionToWindow(this.overlayWindow);
+      this.ensureOverlayAlwaysOnTop();
       this.overlayWindow.focus();
-      this.overlayWindow.setAlwaysOnTop(true, "floating");
       this.isWindowVisible = true;
     }
 

@@ -81,6 +81,12 @@ const App: React.FC = () => {
   // Handlers
   const handleStartMeeting = async () => {
     try {
+      const audioStatus = await window.electronAPI.getNativeAudioStatus();
+      if (audioStatus?.connected) {
+        await window.electronAPI.setWindowMode('overlay');
+        return;
+      }
+
       localStorage.setItem('natively_last_meeting_start', Date.now().toString());
       const inputDeviceId = localStorage.getItem('preferredInputDeviceId');
       let outputDeviceId = localStorage.getItem('preferredOutputDeviceId');

@@ -248,16 +248,9 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({ onEndMeeting }) =
         return () => unsubscribe();
     }, []);
 
-    // Sync Window Visibility with Expanded State
+    // Keep the overlay window visible while toggling expanded/collapsed UI state.
     useEffect(() => {
-        if (isExpanded) {
-            window.electronAPI.showWindow();
-        } else {
-            // Slight delay to allow animation to clean up if needed, though immediate is safer for click-through
-            // Using setTimeout to ensure the render cycle completes first
-            // Increased to 400ms to allow "contract to bottom" exit animation to finish
-            setTimeout(() => window.electronAPI.hideWindow(), 400);
-        }
+        window.electronAPI.showWindow();
     }, [isExpanded]);
 
     // Keyboard shortcut to toggle expanded state (via Main Process)
@@ -1499,19 +1492,18 @@ Provide only the answer, nothing else.`;
         <div ref={contentRef} className="flex flex-col items-center w-fit mx-auto h-fit min-h-0 bg-transparent p-0 rounded-[24px] font-sans text-slate-200 gap-2">
 
             <AnimatePresence>
-                {isExpanded && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 20, scale: 0.95 }}
-                        transition={{ duration: 0.3, ease: "easeInOut" }}
-                        className="flex flex-col items-center gap-2 w-full"
-                    >
-                        <TopPill
-                            expanded={isExpanded}
-                            onToggle={() => setIsExpanded(!isExpanded)}
-                            onQuit={() => onEndMeeting ? onEndMeeting() : window.electronAPI.quitApp()}
-                        />
+                <motion.div
+                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    className="flex flex-col items-center gap-2 w-full"
+                >
+                    <TopPill
+                        expanded={isExpanded}
+                        onToggle={() => setIsExpanded(!isExpanded)}
+                        onQuit={() => onEndMeeting ? onEndMeeting() : window.electronAPI.quitApp()}
+                    />
+                    {isExpanded && (
                         <div className="
                     relative w-[600px] max-w-full
                     bg-[#1E1E1E]/95
@@ -1813,8 +1805,8 @@ Provide only the answer, nothing else.`;
                                 </div>
                             </div>
                         </div>
-                    </motion.div>
-                )}
+                    )}
+                </motion.div>
             </AnimatePresence>
         </div>
     );
