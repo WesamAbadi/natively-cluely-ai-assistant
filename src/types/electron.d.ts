@@ -36,6 +36,7 @@ export interface ElectronAPI {
     height: number
   }) => Promise<void>
   onToggleExpand: (callback: () => void) => () => void
+  onChatAnswerShortcut: (callback: () => void) => () => void
   getRecognitionLanguages: () => Promise<Record<string, any>>
   getScreenshots: () => Promise<Array<{ path: string; preview: string }>>
   deleteScreenshot: (

@@ -175,6 +175,17 @@ export class AppState {
       try {
         if (actionId === 'general:toggle-visibility') {
           this.toggleMainWindow();
+        } else if (actionId === 'chat:answer') {
+          if (!this.isMeetingActive) {
+            console.log('[Main] Ignoring chat:answer shortcut because no meeting is active.');
+            return;
+          }
+
+          this.windowHelper.switchToOverlay();
+          const overlay = this.windowHelper.getOverlayWindow();
+          if (overlay && !overlay.isDestroyed()) {
+            overlay.webContents.send('shortcut-chat-answer');
+          }
         } else if (actionId === 'general:take-screenshot') {
           const screenshotPath = await this.takeScreenshot();
           const preview = await this.getImagePreview(screenshotPath);
@@ -1355,6 +1366,10 @@ export class AppState {
       "Extra screenshots: ",
       this.screenshotHelper.getExtraScreenshotQueue().length
     )
+    if (this.isMeetingActive) {
+      this.windowHelper.switchToOverlay()
+      return
+    }
     this.windowHelper.toggleMainWindow()
   }
 
