@@ -42,6 +42,12 @@ export class WindowHelper {
     this.appState = appState
   }
 
+  private syncVisibilityState(): void {
+    const launcherVisible = !!(this.launcherWindow && !this.launcherWindow.isDestroyed() && this.launcherWindow.isVisible())
+    const overlayVisible = !!(this.overlayWindow && !this.overlayWindow.isDestroyed() && this.overlayWindow.isVisible())
+    this.isWindowVisible = launcherVisible || overlayVisible
+  }
+
   private applyContentProtectionToWindow(win: BrowserWindow | null): void {
     if (!win || win.isDestroyed()) return
 
@@ -74,6 +80,28 @@ export class WindowHelper {
 
     // Re-assert z-order because some fullscreen transitions can demote the window.
     this.overlayWindow.moveTop()
+  }
+
+  private revealOverlayWindow(): void {
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+
+    this.applyContentProtectionToWindow(this.overlayWindow)
+    this.ensureOverlayAlwaysOnTop()
+
+    if (process.platform === "darwin") {
+      app.focus({ steal: true })
+    }
+
+    this.overlayWindow.show()
+    this.overlayWindow.moveTop()
+    this.overlayWindow.focus()
+
+    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.launcherWindow.hide()
+    }
+
+    this.currentWindowMode = 'overlay'
+    this.syncVisibilityState()
   }
 
   public setContentProtection(enable: boolean): void {
@@ -269,6 +297,11 @@ export class WindowHelper {
 
     this.launcherWindow.on("show", () => {
       this.applyContentProtectionToWindow(this.launcherWindow)
+      this.syncVisibilityState()
+    })
+
+    this.launcherWindow.on("hide", () => {
+      this.syncVisibilityState()
     })
 
     this.launcherWindow.on("closed", () => {
@@ -286,6 +319,11 @@ export class WindowHelper {
       this.overlayWindow.on("show", () => {
         this.applyContentProtectionToWindow(this.overlayWindow)
         this.ensureOverlayAlwaysOnTop()
+        this.syncVisibilityState()
+      })
+
+      this.overlayWindow.on("hide", () => {
+        this.syncVisibilityState()
       })
 
       this.overlayWindow.on("focus", () => {
@@ -344,6 +382,18 @@ export class WindowHelper {
   }
 
   public toggleMainWindow(): void {
+    this.syncVisibilityState()
+
+    const overlayVisible = !!(this.overlayWindow && !this.overlayWindow.isDestroyed() && this.overlayWindow.isVisible())
+    const overlayFocused = !!(this.overlayWindow && !this.overlayWindow.isDestroyed() && this.overlayWindow.isFocused())
+
+    // If we're in overlay mode and it's visible but not focused (e.g. behind fullscreen app),
+    // make the shortcut bring it to the front instead of hiding it.
+    if (this.currentWindowMode === 'overlay' && overlayVisible && !overlayFocused) {
+      this.revealOverlayWindow()
+      return
+    }
+
     if (this.isWindowVisible) {
       this.hideMainWindow()
     } else {
@@ -367,30 +417,16 @@ export class WindowHelper {
     console.log('[WindowHelper] Switching to OVERLAY');
     this.currentWindowMode = 'overlay';
 
-    // Show Overlay FIRST
+    // Reset overlay position to center before reveal.
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-      this.applyContentProtectionToWindow(this.overlayWindow);
-      // Reset overlay position to center or last known? 
-      // For now, center it nicely
       const primaryDisplay = screen.getPrimaryDisplay()
       const workArea = primaryDisplay.workAreaSize
       const x = Math.floor((workArea.width - 600) / 2)
       const y = Math.floor((workArea.height - 600) / 2)
-
-      // Only reset if not already positioned? existing logic used to remember but let's reset for predictability
       this.overlayWindow.setBounds({ x, y, width: 600, height: 216 });
-
-      this.overlayWindow.show();
-      this.applyContentProtectionToWindow(this.overlayWindow);
-      this.ensureOverlayAlwaysOnTop();
-      this.overlayWindow.focus();
-      this.isWindowVisible = true;
     }
 
-    // Hide Launcher SECOND
-    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-      this.launcherWindow.hide();
-    }
+    this.revealOverlayWindow()
   }
 
   public switchToLauncher(): void {
