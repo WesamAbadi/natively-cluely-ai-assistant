@@ -1,3 +1,8 @@
+const isMacPlatform = (): boolean => {
+    if (typeof navigator === 'undefined') return false;
+    return /Mac|iPod|iPhone|iPad/i.test(navigator.platform);
+};
+
 /**
  * Converts an Electron Accelerator string to an array of keys for the frontend.
  * Example: "CommandOrControl+Shift+Space" -> ["Meta", "Shift", "Space"]
@@ -9,10 +14,16 @@ export function acceleratorToKeys(accelerator: string): string[] {
     return parts.map(part => {
         switch (part.toLowerCase()) {
             case 'commandorcontrol':
+                return isMacPlatform() ? '⌘' : '⌃';
             case 'cmd':
             case 'command':
-            case 'meta':
                 return '⌘';
+            case 'meta':
+                return isMacPlatform() ? '⌘' : '⊞';
+            case 'super':
+            case 'win':
+            case 'windows':
+                return '⊞';
             case 'control':
             case 'ctrl':
                 return '⌃';
@@ -54,7 +65,13 @@ export function keysToAccelerator(keys: string[]): string {
             case 'command':
             case 'cmd':
             case '⌘':
-                modifiers.push('CommandOrControl');
+                modifiers.push('Command');
+                break;
+            case 'super':
+            case 'win':
+            case 'windows':
+            case '⊞':
+                modifiers.push('Super');
                 break;
             case 'control':
             case 'ctrl':
@@ -90,8 +107,18 @@ export function keysToAccelerator(keys: string[]): string {
             case '→':
                 mainKey = 'Right';
                 break;
+            case 'space':
+                mainKey = 'Space';
+                break;
+            case 'enter':
+                mainKey = 'Enter';
+                break;
             default:
-                mainKey = key.toUpperCase();
+                if (key.length === 1) {
+                    mainKey = key.toUpperCase();
+                } else {
+                    mainKey = key;
+                }
         }
     });
 

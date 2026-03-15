@@ -196,6 +196,7 @@ interface ElectronAPI {
   showWindow: () => Promise<void>
   hideWindow: () => Promise<void>
   onToggleExpand: (callback: () => void) => () => void
+  onChatWhatToAnswerShortcut: (callback: () => void) => () => void
   onChatAnswerShortcut: (callback: () => void) => () => void
   toggleAdvancedSettings: () => Promise<void>
 
@@ -462,6 +463,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("toggle-expand", subscription)
     return () => {
       ipcRenderer.removeListener("toggle-expand", subscription)
+    }
+  },
+  onChatWhatToAnswerShortcut: (callback: () => void) => {
+    const subscription = () => callback()
+    ipcRenderer.on("shortcut-chat-what-to-answer", subscription)
+    return () => {
+      ipcRenderer.removeListener("shortcut-chat-what-to-answer", subscription)
     }
   },
   onChatAnswerShortcut: (callback: () => void) => {

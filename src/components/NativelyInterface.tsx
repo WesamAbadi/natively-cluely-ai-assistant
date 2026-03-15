@@ -1335,6 +1335,14 @@ Provide only the answer, nothing else.`;
     };
 
     useEffect(() => {
+        if (!window.electronAPI?.onChatWhatToAnswerShortcut) return;
+        const unsubscribe = window.electronAPI.onChatWhatToAnswerShortcut(() => {
+            handlersRef.current.handleWhatToSay();
+        });
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
         if (!window.electronAPI?.onChatAnswerShortcut) return;
         const unsubscribe = window.electronAPI.onChatAnswerShortcut(() => {
             handlersRef.current.handleAnswerNow();
@@ -1344,13 +1352,10 @@ Provide only the answer, nothing else.`;
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            const { handleWhatToSay, handleFollowUp, handleFollowUpQuestions, handleRecap } = handlersRef.current;
+            const { handleFollowUp, handleFollowUpQuestions, handleRecap } = handlersRef.current;
 
             // Chat Shortcuts (Scope: Local to Chat/Overlay usually, but we allow them here if focused)
-            if (isShortcutPressed(e, 'whatToAnswer')) {
-                e.preventDefault();
-                handleWhatToSay();
-            } else if (isShortcutPressed(e, 'shorten')) {
+            if (isShortcutPressed(e, 'shorten')) {
                 e.preventDefault();
                 handleFollowUp('shorten');
             } else if (isShortcutPressed(e, 'followUp')) {

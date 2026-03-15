@@ -23,23 +23,30 @@ export interface ShortcutConfig {
     selectiveScreenshot: string[];
 }
 
+const isMacPlatform = (): boolean => {
+    if (typeof navigator === 'undefined') return false;
+    return /Mac|iPod|iPhone|iPad/i.test(navigator.platform);
+};
+
+const PRIMARY_MODIFIER = isMacPlatform() ? '⌘' : '⌃';
+
 export const DEFAULT_SHORTCUTS: ShortcutConfig = {
-    whatToAnswer: ['⌘', '1'],
-    shorten: ['⌘', '2'],
-    followUp: ['⌘', '3'],
-    recap: ['⌘', '4'],
-    answer: ['⌘', '5'],
+    whatToAnswer: [PRIMARY_MODIFIER, '1'],
+    shorten: [PRIMARY_MODIFIER, '2'],
+    followUp: [PRIMARY_MODIFIER, '3'],
+    recap: [PRIMARY_MODIFIER, '4'],
+    answer: [PRIMARY_MODIFIER, '5'],
     scrollUp: ['↑'],
     scrollDown: ['↓'],
-    moveWindowUp: ['⌘', '↑'],
-    moveWindowDown: ['⌘', '↓'],
-    moveWindowLeft: ['⌘', '←'],
-    moveWindowRight: ['⌘', '→'],
-    toggleVisibility: ['⌘', 'B'],
-    processScreenshots: ['⌘', 'Enter'],
-    resetCancel: ['⌘', 'R'],
-    takeScreenshot: ['⌘', 'H'],
-    selectiveScreenshot: ['⌘', 'Shift', 'H']
+    moveWindowUp: [PRIMARY_MODIFIER, '↑'],
+    moveWindowDown: [PRIMARY_MODIFIER, '↓'],
+    moveWindowLeft: [PRIMARY_MODIFIER, '←'],
+    moveWindowRight: [PRIMARY_MODIFIER, '→'],
+    toggleVisibility: [PRIMARY_MODIFIER, 'B'],
+    processScreenshots: [PRIMARY_MODIFIER, 'Enter'],
+    resetCancel: [PRIMARY_MODIFIER, 'R'],
+    takeScreenshot: [PRIMARY_MODIFIER, 'H'],
+    selectiveScreenshot: [PRIMARY_MODIFIER, 'Shift', 'H']
 };
 
 export const useShortcuts = () => {
@@ -156,34 +163,38 @@ export const useShortcuts = () => {
         // Check modifiers
         // Note: We use the symbols now in UI, but keyboard events still use standard properties
         const hasMeta = keys.some(k => ['⌘', 'Command', 'Meta'].includes(k));
+        const hasSuper = keys.some(k => ['⊞', 'Super', 'Win', 'Windows'].includes(k));
         const hasCtrl = keys.some(k => ['⌃', 'Control', 'Ctrl'].includes(k));
         const hasAlt = keys.some(k => ['⌥', 'Alt', 'Option'].includes(k));
         const hasShift = keys.some(k => ['⇧', 'Shift'].includes(k));
 
-        if (event.metaKey !== hasMeta) return false;
+        if (event.metaKey !== (hasMeta || hasSuper)) return false;
         if (event.ctrlKey !== hasCtrl) return false;
         if (event.altKey !== hasAlt) return false;
         if (event.shiftKey !== hasShift) return false;
 
         // Find the main non-modifier key
         const mainKey = keys.find(k =>
-            !['⌘', 'Command', 'Meta', '⇧', 'Shift', '⌥', 'Alt', 'Option', '⌃', 'Control', 'Ctrl'].includes(k)
+            !['⌘', 'Command', 'Meta', '⊞', 'Super', 'Win', 'Windows', '⇧', 'Shift', '⌥', 'Alt', 'Option', '⌃', 'Control', 'Ctrl'].includes(k)
         );
 
         if (!mainKey) return false; // Modifiers only
 
-        // Normalize checks
-        const eventKey = event.key.toLowerCase();
-        const configKey = mainKey.toLowerCase();
+        const normalizeKey = (value: string): string => {
+            const key = value.toLowerCase();
+            if (key === '↑' || key === 'up' || key === 'arrowup') return 'arrowup';
+            if (key === '↓' || key === 'down' || key === 'arrowdown') return 'arrowdown';
+            if (key === '←' || key === 'left' || key === 'arrowleft') return 'arrowleft';
+            if (key === '→' || key === 'right' || key === 'arrowright') return 'arrowright';
+            return key;
+        };
 
-        // Handle Space specifically
+        const configKey = normalizeKey(mainKey);
+        const eventKey = normalizeKey(event.key);
+
         if (configKey === 'space') {
             return event.code === 'Space';
         }
-
-        // Handle Arrow keys
-        // Electron accelerator uses 'ArrowUp' (mapped from 'Up'), event.key is 'ArrowUp'
-        // So direct comparison usually works
 
         return eventKey === configKey;
     }, [shortcuts]);

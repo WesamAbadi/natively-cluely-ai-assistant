@@ -175,6 +175,17 @@ export class AppState {
       try {
         if (actionId === 'general:toggle-visibility') {
           this.toggleMainWindow();
+        } else if (actionId === 'chat:whatToAnswer') {
+          if (!this.isMeetingActive) {
+            console.log('[Main] Ignoring chat:whatToAnswer shortcut because no meeting is active.');
+            return;
+          }
+
+          this.windowHelper.switchToOverlay();
+          const overlay = this.windowHelper.getOverlayWindow();
+          if (overlay && !overlay.isDestroyed()) {
+            overlay.webContents.send('shortcut-chat-what-to-answer');
+          }
         } else if (actionId === 'chat:answer') {
           if (!this.isMeetingActive) {
             console.log('[Main] Ignoring chat:answer shortcut because no meeting is active.');
