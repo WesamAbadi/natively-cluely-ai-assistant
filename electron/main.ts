@@ -1046,6 +1046,8 @@ export class AppState {
 
     if (!this.isMeetingActive) {
       console.log('[Main] endMeeting ignored because no meeting is active.');
+      // Recover from stale overlay state even if meeting flag is already false.
+      this.windowHelper.switchToLauncher();
       return;
     }
 
@@ -1061,6 +1063,9 @@ export class AppState {
 
     this.stopAudioHealthMonitor();
     this.broadcastNativeAudioEvent('native-audio-disconnected');
+
+    // Switch UI immediately so overlay doesn't remain visible while post-processing runs.
+    this.windowHelper.switchToLauncher();
 
     // 4b. Stop JIT RAG live indexing (flush remaining segments)
     if (this.ragManager) {

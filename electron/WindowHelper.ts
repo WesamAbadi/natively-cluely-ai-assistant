@@ -1,16 +1,14 @@
-
 import { BrowserWindow, screen, app } from "electron"
 import { AppState } from "./main"
 import path from "node:path"
 
 const isEnvDev = process.env.NODE_ENV === "development"
-const isPackaged = app.isPackaged;
-const inAppBundle = process.execPath.includes('.app/') || process.execPath.includes('.app\\');
+const isPackaged = app.isPackaged
+const inAppBundle = process.execPath.includes(".app/") || process.execPath.includes(".app\\")
 
-console.log(`[WindowHelper] isEnvDev: ${isEnvDev}, isPackaged: ${isPackaged}, inAppBundle: ${inAppBundle}`);
+console.log(`[WindowHelper] isEnvDev: ${isEnvDev}, isPackaged: ${isPackaged}, inAppBundle: ${inAppBundle}`)
 
-// Force production mode if running as packaged app or inside app bundle
-const isDev = isEnvDev && !isPackaged;
+const isDev = isEnvDev && !isPackaged
 
 const startUrl = isDev
   ? "http://localhost:5180"
@@ -21,19 +19,16 @@ export class WindowHelper {
   private overlayWindow: BrowserWindow | null = null
   private isWindowVisible: boolean = false
   private contentProtectionEnabled: boolean = false
-  // Position/Size tracking for Launcher
+
   private launcherPosition: { x: number; y: number } | null = null
   private launcherSize: { width: number; height: number } | null = null
-  // Track current window mode (persists even when overlay is hidden via Cmd+B)
-  private currentWindowMode: 'launcher' | 'overlay' = 'launcher'
+  private currentWindowMode: "launcher" | "overlay" = "launcher"
 
   private appState: AppState
 
-  // Initialize with explicit number type and 0 value
   private screenWidth: number = 0
   private screenHeight: number = 0
 
-  // Movement variables (apply to active window)
   private step: number = 20
   private currentX: number = 0
   private currentY: number = 0
@@ -48,10 +43,30 @@ export class WindowHelper {
     this.isWindowVisible = launcherVisible || overlayVisible
   }
 
-  private syncVisibilityState(): void {
-    const launcherVisible = !!(this.launcherWindow && !this.launcherWindow.isDestroyed() && this.launcherWindow.isVisible())
-    const overlayVisible = !!(this.overlayWindow && !this.overlayWindow.isDestroyed() && this.overlayWindow.isVisible())
-    this.isWindowVisible = launcherVisible || overlayVisible
+  private clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max)
+  }
+
+  private getOverlayWorkArea(): Electron.Rectangle {
+    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
+      return screen.getDisplayMatching(this.overlayWindow.getBounds()).workArea
+    }
+    return screen.getPrimaryDisplay().workArea
+  }
+
+  private keepOverlayInWorkArea(): void {
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+
+    const bounds = this.overlayWindow.getBounds()
+    const workArea = this.getOverlayWorkArea()
+    const maxX = workArea.x + Math.max(0, workArea.width - bounds.width)
+    const maxY = workArea.y + Math.max(0, workArea.height - bounds.height)
+    const nextX = this.clamp(bounds.x, workArea.x, maxX)
+    const nextY = this.clamp(bounds.y, workArea.y, maxY)
+
+    if (nextX !== bounds.x || nextY !== bounds.y) {
+      this.overlayWindow.setPosition(nextX, nextY)
+    }
   }
 
   private applyContentProtectionToWindow(win: BrowserWindow | null): void {
@@ -59,8 +74,6 @@ export class WindowHelper {
 
     win.setContentProtection(this.contentProtectionEnabled)
 
-    // Some platforms/compositors can drop protection while transitioning visibility.
-    // Re-apply shortly after the show cycle when stealth mode is active.
     if (this.contentProtectionEnabled && win.isVisible()) {
       setTimeout(() => {
         if (!win.isDestroyed()) {
@@ -86,7 +99,6 @@ export class WindowHelper {
       this.overlayWindow.setAlwaysOnTop(true)
     }
 
-    // Re-assert z-order because some fullscreen transitions can demote the window.
     this.overlayWindow.moveTop()
   }
 
@@ -95,6 +107,7 @@ export class WindowHelper {
 
     this.applyContentProtectionToWindow(this.overlayWindow)
     this.ensureOverlayAlwaysOnTop()
+    this.keepOverlayInWorkArea()
 
     if (process.platform === "darwin") {
       app.focus({ steal: true })
@@ -108,29 +121,7 @@ export class WindowHelper {
       this.launcherWindow.hide()
     }
 
-    this.currentWindowMode = 'overlay'
-    this.syncVisibilityState()
-  }
-
-  private revealOverlayWindow(): void {
-    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
-
-    this.applyContentProtectionToWindow(this.overlayWindow)
-    this.ensureOverlayAlwaysOnTop()
-
-    if (process.platform === "darwin") {
-      app.focus({ steal: true })
-    }
-
-    this.overlayWindow.show()
-    this.overlayWindow.moveTop()
-    this.overlayWindow.focus()
-
-    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-      this.launcherWindow.hide()
-    }
-
-    this.currentWindowMode = 'overlay'
+    this.currentWindowMode = "overlay"
     this.syncVisibilityState()
   }
 
@@ -142,77 +133,72 @@ export class WindowHelper {
   }
 
   public setWindowDimensions(width: number, height: number): void {
-    const activeWindow = this.getMainWindow(); // Gets currently focused/relevant window
+    const activeWindow = this.getMainWindow()
     if (!activeWindow || activeWindow.isDestroyed()) return
 
     const [currentX, currentY] = activeWindow.getPosition()
-    const primaryDisplay = screen.getPrimaryDisplay()
-    const workArea = primaryDisplay.workAreaSize
+    const workArea = screen.getDisplayMatching(activeWindow.getBounds()).workArea
     const maxAllowedWidth = Math.floor(workArea.width * 0.9)
     const newWidth = Math.min(width, maxAllowedWidth)
     const newHeight = Math.ceil(height)
-    const maxX = workArea.width - newWidth
-    const newX = Math.min(Math.max(currentX, 0), maxX)
+    const maxX = workArea.x + workArea.width - newWidth
+    const newX = this.clamp(currentX, workArea.x, maxX)
 
     activeWindow.setBounds({
       x: newX,
       y: currentY,
       width: newWidth,
-      height: newHeight
+      height: newHeight,
     })
 
-    // Update internal tracking if it's launcher
     if (activeWindow === this.launcherWindow) {
       this.launcherSize = { width: newWidth, height: newHeight }
       this.launcherPosition = { x: newX, y: currentY }
     }
   }
 
-  // Dedicated method for overlay window resizing - decoupled from launcher
   public setOverlayDimensions(width: number, height: number): void {
     if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
-    console.log('[WindowHelper] setOverlayDimensions:', width, height);
+    console.log("[WindowHelper] setOverlayDimensions:", width, height)
 
     const [currentX, currentY] = this.overlayWindow.getPosition()
-    const primaryDisplay = screen.getPrimaryDisplay()
-    const workArea = primaryDisplay.workAreaSize
+    const workArea = this.getOverlayWorkArea()
     const maxAllowedWidth = Math.floor(workArea.width * 0.9)
     const maxAllowedHeight = Math.floor(workArea.height * 0.9)
-    const newWidth = Math.min(Math.max(width, 300), maxAllowedWidth) // min 300, max 90%
-    const newHeight = Math.min(Math.max(height, 1), maxAllowedHeight) // min 1, max 90%
-    const maxX = workArea.width - newWidth
-    const maxY = workArea.height - newHeight
-    const newX = Math.min(Math.max(currentX, 0), maxX)
-    const newY = Math.min(Math.max(currentY, 0), maxY)
+    const newWidth = Math.min(Math.max(width, 300), maxAllowedWidth)
+    const newHeight = Math.min(Math.max(height, 1), maxAllowedHeight)
+    const maxX = workArea.x + workArea.width - newWidth
+    const maxY = workArea.y + workArea.height - newHeight
+    const newX = this.clamp(currentX, workArea.x, maxX)
+    const newY = this.clamp(currentY, workArea.y, maxY)
 
-    this.overlayWindow.setContentSize(newWidth, newHeight)
-    this.overlayWindow.setPosition(newX, newY)
+    this.overlayWindow.setBounds({
+      x: Math.round(newX),
+      y: Math.round(newY),
+      width: Math.round(newWidth),
+      height: Math.round(newHeight),
+    })
   }
 
   public createWindow(): void {
-    if (this.launcherWindow !== null) return // Already created
+    if (this.launcherWindow !== null) return
 
     const primaryDisplay = screen.getPrimaryDisplay()
     const workArea = primaryDisplay.workArea
     this.screenWidth = workArea.width
     this.screenHeight = workArea.height
 
-    // Fixed dimensions per user request
-    const width = 1200;
-    const height = 800;
+    const width = 1200
+    const height = 800
+    const x = Math.round(workArea.x + (workArea.width - width) / 2)
+    const topMargin = Math.round(workArea.height * 0.05)
+    const y = Math.round(workArea.y + topMargin)
 
-    // Calculate centered X, and top-centered Y (5% from top)
-    const x = Math.round(workArea.x + (workArea.width - width) / 2);
-    // Ensure y is at least workArea.y (don't go offscreen top)
-    const topMargin = Math.round(workArea.height * 0.05);
-    const y = Math.round(workArea.x + topMargin);
-
-    // --- 1. Create Launcher Window ---
     const launcherSettings: Electron.BrowserWindowConstructorOptions = {
-      width: width,
-      height: height,
-      x: x,
-      y: y,
+      width,
+      height,
+      x,
+      y,
       minWidth: 600,
       minHeight: 400,
       webPreferences: {
@@ -220,51 +206,49 @@ export class WindowHelper {
         contextIsolation: true,
         preload: path.join(__dirname, "preload.js"),
         scrollBounce: true,
-        webSecurity: !isDev, // DEBUG: Disable web security only in dev
+        webSecurity: !isDev,
       },
-      show: false, // DEBUG: Force show -> Fixed white screen, now relies on ready-to-show
-      titleBarStyle: 'hiddenInset',
+      show: false,
+      titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 14, y: 14 },
-      vibrancy: 'under-window',
-      visualEffectState: 'followWindow',
-      transparent: false, // DEBUG: Disable transparency
+      vibrancy: "under-window",
+      visualEffectState: "followWindow",
+      transparent: false,
       hasShadow: true,
-      backgroundColor: "#000000", // Fixed: Black background to match startup sequence
+      backgroundColor: "#000000",
       focusable: true,
       resizable: true,
       movable: true,
       center: true,
       icon: app.isPackaged
         ? path.join(process.resourcesPath, "natively.icns")
-        : path.resolve(__dirname, "../assets/natively.icns")
+        : path.resolve(__dirname, "../assets/natively.icns"),
     }
 
-    console.log(`[WindowHelper] Icon Path: ${launcherSettings.icon}`);
-    console.log(`[WindowHelper] Start URL: ${startUrl}`);
+    console.log(`[WindowHelper] Icon Path: ${launcherSettings.icon}`)
+    console.log(`[WindowHelper] Start URL: ${startUrl}`)
 
     try {
       this.launcherWindow = new BrowserWindow(launcherSettings)
-      console.log('[WindowHelper] BrowserWindow created successfully');
+      console.log("[WindowHelper] BrowserWindow created successfully")
     } catch (err) {
-      console.error('[WindowHelper] Failed to create BrowserWindow:', err);
-      return;
+      console.error("[WindowHelper] Failed to create BrowserWindow:", err)
+      return
     }
 
     this.applyContentProtectionToWindow(this.launcherWindow)
 
-    this.launcherWindow.loadURL(`${startUrl}?window=launcher`)
-      .then(() => console.log('[WindowHelper] loadURL success'))
-      .catch((e) => { console.error("[WindowHelper] Failed to load URL:", e) })
+    this.launcherWindow
+      .loadURL(`${startUrl}?window=launcher`)
+      .then(() => console.log("[WindowHelper] loadURL success"))
+      .catch((e) => {
+        console.error("[WindowHelper] Failed to load URL:", e)
+      })
 
-    this.launcherWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-      console.error(`[WindowHelper] did-fail-load: ${errorCode} ${errorDescription}`);
-    });
+    this.launcherWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+      console.error(`[WindowHelper] did-fail-load: ${errorCode} ${errorDescription}`)
+    })
 
-    // if (isDev) {
-    //   this.launcherWindow.webContents.openDevTools({ mode: 'detach' }); // DEBUG: Open DevTools
-    // }
-
-    // --- 2. Create Overlay Window (Hidden initially) ---
     const overlaySettings: Electron.BrowserWindowConstructorOptions = {
       width: 600,
       height: 1,
@@ -277,27 +261,24 @@ export class WindowHelper {
         scrollBounce: true,
       },
       show: false,
-      frame: false, // Frameless
+      frame: false,
       transparent: true,
       backgroundColor: "#00000000",
       alwaysOnTop: true,
       fullscreenable: false,
       focusable: true,
-      resizable: false, // Enforce automatic resizing only
+      resizable: false,
       movable: true,
-      skipTaskbar: true, // Don't show separately in dock/taskbar
-      hasShadow: false, // Prevent shadow from adding perceived size/artifacts
+      skipTaskbar: true,
+      hasShadow: false,
     }
 
     this.overlayWindow = new BrowserWindow(overlaySettings)
     this.applyContentProtectionToWindow(this.overlayWindow)
-
     this.ensureOverlayAlwaysOnTop()
+    this.overlayWindow.loadURL(`${startUrl}?window=overlay`).catch(() => {})
 
-    this.overlayWindow.loadURL(`${startUrl}?window=overlay`).catch(() => { })
-
-    // --- 3. Startup Sequence ---
-    this.launcherWindow.once('ready-to-show', () => {
+    this.launcherWindow.once("ready-to-show", () => {
       this.launcherWindow?.show()
       this.launcherWindow?.focus()
       this.isWindowVisible = true
@@ -310,19 +291,17 @@ export class WindowHelper {
     if (!this.launcherWindow) return
 
     this.launcherWindow.on("move", () => {
-      if (this.launcherWindow) {
-        const bounds = this.launcherWindow.getBounds()
-        this.launcherPosition = { x: bounds.x, y: bounds.y }
-        this.appState.settingsWindowHelper.reposition(bounds)
-      }
+      if (!this.launcherWindow) return
+      const bounds = this.launcherWindow.getBounds()
+      this.launcherPosition = { x: bounds.x, y: bounds.y }
+      this.appState.settingsWindowHelper.reposition(bounds)
     })
 
     this.launcherWindow.on("resize", () => {
-      if (this.launcherWindow) {
-        const bounds = this.launcherWindow.getBounds()
-        this.launcherSize = { width: bounds.width, height: bounds.height }
-        this.appState.settingsWindowHelper.reposition(bounds)
-      }
+      if (!this.launcherWindow) return
+      const bounds = this.launcherWindow.getBounds()
+      this.launcherSize = { width: bounds.width, height: bounds.height }
+      this.appState.settingsWindowHelper.reposition(bounds)
     })
 
     this.launcherWindow.on("show", () => {
@@ -332,16 +311,10 @@ export class WindowHelper {
 
     this.launcherWindow.on("hide", () => {
       this.syncVisibilityState()
-      this.syncVisibilityState()
-    })
-
-    this.launcherWindow.on("hide", () => {
-      this.syncVisibilityState()
     })
 
     this.launcherWindow.on("closed", () => {
       this.launcherWindow = null
-      // If launcher closes, we should probably quit app or close overlay
       if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
         this.overlayWindow.close()
       }
@@ -349,82 +322,78 @@ export class WindowHelper {
       this.isWindowVisible = false
     })
 
-    // Listen for overlay close if independent closing acts as "Stop Meeting"
-    if (this.overlayWindow) {
-      this.overlayWindow.on("show", () => {
-        this.applyContentProtectionToWindow(this.overlayWindow)
+    if (!this.overlayWindow) return
+
+    this.overlayWindow.on("show", () => {
+      this.applyContentProtectionToWindow(this.overlayWindow)
+      this.ensureOverlayAlwaysOnTop()
+      this.keepOverlayInWorkArea()
+      this.syncVisibilityState()
+    })
+
+    this.overlayWindow.on("hide", () => {
+      this.syncVisibilityState()
+    })
+
+    this.overlayWindow.on("focus", () => {
+      this.ensureOverlayAlwaysOnTop()
+    })
+
+    this.overlayWindow.on("blur", () => {
+      setTimeout(() => {
         this.ensureOverlayAlwaysOnTop()
-        this.syncVisibilityState()
-      })
+      }, 50)
+    })
 
-      this.overlayWindow.on("hide", () => {
-        this.syncVisibilityState()
-        this.syncVisibilityState()
-      })
-
-      this.overlayWindow.on("hide", () => {
-        this.syncVisibilityState()
-      })
-
-      this.overlayWindow.on("focus", () => {
-        this.ensureOverlayAlwaysOnTop()
-      })
-
-      this.overlayWindow.on("blur", () => {
-        setTimeout(() => {
-          this.ensureOverlayAlwaysOnTop()
-        }, 50)
-      })
-
-      this.overlayWindow.on('close', (e) => {
-        // Prevent accidental closing via cmd+w if we want to enforce workflow? 
-        // Or treat as end meeting. simpler to treat as hiding for now.
-        if (this.isWindowVisible && this.overlayWindow?.isVisible()) {
-          e.preventDefault();
-          this.switchToLauncher();
-          // Notify backend meeting ended? Handled via IPC ideally.
-        }
-      })
-    }
+    this.overlayWindow.on("close", (e) => {
+      if (this.isWindowVisible && this.overlayWindow?.isVisible()) {
+        e.preventDefault()
+        this.switchToLauncher()
+      }
+    })
   }
 
-  // Helper to get whichever window should be treated as "Main" for IPC
   public getMainWindow(): BrowserWindow | null {
-    if (this.overlayWindow && this.overlayWindow.isVisible()) {
-      return this.overlayWindow;
+    if (this.overlayWindow && !this.overlayWindow.isDestroyed() && this.overlayWindow.isVisible()) {
+      return this.overlayWindow
     }
-    return this.launcherWindow;
+    return this.launcherWindow
   }
 
-  // Specific getters if needed
-  public getLauncherWindow(): BrowserWindow | null { return this.launcherWindow }
-  public getOverlayWindow(): BrowserWindow | null { return this.overlayWindow }
-  public getCurrentWindowMode(): 'launcher' | 'overlay' { return this.currentWindowMode }
+  public getLauncherWindow(): BrowserWindow | null {
+    return this.launcherWindow
+  }
+
+  public getOverlayWindow(): BrowserWindow | null {
+    return this.overlayWindow
+  }
+
+  public getCurrentWindowMode(): "launcher" | "overlay" {
+    return this.currentWindowMode
+  }
 
   public isVisible(): boolean {
     return this.isWindowVisible
   }
 
   public hideMainWindow(): void {
-    // Hide BOTH
     this.launcherWindow?.hide()
     this.overlayWindow?.hide()
     this.isWindowVisible = false
   }
 
   public showMainWindow(): void {
-    // Show the window corresponding to the current mode
-    if (this.currentWindowMode === 'overlay') {
-      this.switchToOverlay();
+    if (this.currentWindowMode === "overlay") {
+      this.switchToOverlay()
     } else {
-      this.switchToLauncher();
+      this.switchToLauncher()
     }
   }
 
   public toggleMainWindow(): void {
     this.syncVisibilityState()
-    // Overlay mode is sticky: toggles should always re-focus/reveal it, never hide it.
-    if (this.currentWindowMode === 'overlay') {
+
+    if (this.currentWindowMode === "overlay") {
       this.revealOverlayWindow()
       return
     }
@@ -437,80 +406,90 @@ export class WindowHelper {
   }
 
   public toggleOverlayWindow(): void {
-    this.toggleMainWindow();
+    this.toggleMainWindow()
   }
 
   public centerAndShowWindow(): void {
-    // Default to launcher
-    this.switchToLauncher();
-    this.launcherWindow?.center();
+    this.switchToLauncher()
+    this.launcherWindow?.center()
   }
 
-  // --- Swapping Logic ---
-
   public switchToOverlay(): void {
-    console.log('[WindowHelper] Switching to OVERLAY');
-    this.currentWindowMode = 'overlay';
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+    console.log("[WindowHelper] Switching to OVERLAY")
+    this.currentWindowMode = "overlay"
 
-    // Reset overlay position to center before reveal.
-    // Reset overlay position to center before reveal.
-    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-      const primaryDisplay = screen.getPrimaryDisplay()
-      const workArea = primaryDisplay.workAreaSize
-      const x = Math.floor((workArea.width - 600) / 2)
-      const y = Math.floor((workArea.height - 600) / 2)
-      this.overlayWindow.setBounds({ x, y, width: 600, height: 216 });
+    const shouldResetBounds = !this.overlayWindow.isVisible()
+    if (shouldResetBounds) {
+      const targetDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+      const workArea = targetDisplay.workArea
+      const width = 600
+      const height = 216
+      const x = workArea.x + Math.floor((workArea.width - width) / 2)
+      const y = workArea.y + Math.floor((workArea.height - height) / 2)
+      this.overlayWindow.setBounds({ x, y, width, height })
+    } else {
+      this.keepOverlayInWorkArea()
     }
 
     this.revealOverlayWindow()
   }
 
-    this.revealOverlayWindow()
-  }
-
   public switchToLauncher(): void {
-  console.log('[WindowHelper] Switching to LAUNCHER');
-  this.currentWindowMode = 'launcher';
+    console.log("[WindowHelper] Switching to LAUNCHER")
+    this.currentWindowMode = "launcher"
 
-  // Show Launcher FIRST
-  if(this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-  this.applyContentProtectionToWindow(this.launcherWindow);
-  this.launcherWindow.show();
-  this.applyContentProtectionToWindow(this.launcherWindow);
-  this.launcherWindow.focus();
-  this.isWindowVisible = true;
+    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.applyContentProtectionToWindow(this.launcherWindow)
+      this.launcherWindow.show()
+      this.applyContentProtectionToWindow(this.launcherWindow)
+      this.launcherWindow.focus()
+      this.isWindowVisible = true
+    }
 
-}
+    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
+      this.overlayWindow.hide()
+    }
 
-// Hide Overlay SECOND
-if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-  this.overlayWindow.hide();
-}
+    this.syncVisibilityState()
   }
 
-  // Simplified setWindowMode that just calls switchers
-  public setWindowMode(mode: 'launcher' | 'overlay'): void {
-  if(mode === 'launcher') {
-  this.switchToLauncher();
-} else {
-  this.switchToOverlay();
-}
+  public setWindowMode(mode: "launcher" | "overlay"): void {
+    if (mode === "launcher") {
+      this.switchToLauncher()
+    } else {
+      this.switchToOverlay()
+    }
   }
 
-  // --- Window Movement (Applies to Overlay mostly, but generalized to active) ---
   private moveActiveWindow(dx: number, dy: number): void {
-  const win = this.getMainWindow();
-  if(!win) return;
+    const win = this.getMainWindow()
+    if (!win || win.isDestroyed()) return
 
-  const [x, y] = win.getPosition();
-  win.setPosition(x + dx, y + dy);
+    const [x, y] = win.getPosition()
+    win.setPosition(x + dx, y + dy)
 
-  this.currentX = x + dx;
-  this.currentY = y + dy;
-}
+    if (win === this.overlayWindow) {
+      this.keepOverlayInWorkArea()
+    }
 
-  public moveWindowRight(): void { this.moveActiveWindow(this.step, 0) }
-  public moveWindowLeft(): void { this.moveActiveWindow(-this.step, 0) }
-  public moveWindowDown(): void { this.moveActiveWindow(0, this.step) }
-  public moveWindowUp(): void { this.moveActiveWindow(0, -this.step) }
+    this.currentX = x + dx
+    this.currentY = y + dy
+  }
+
+  public moveWindowRight(): void {
+    this.moveActiveWindow(this.step, 0)
+  }
+
+  public moveWindowLeft(): void {
+    this.moveActiveWindow(-this.step, 0)
+  }
+
+  public moveWindowDown(): void {
+    this.moveActiveWindow(0, this.step)
+  }
+
+  public moveWindowUp(): void {
+    this.moveActiveWindow(0, -this.step)
+  }
 }
