@@ -48,6 +48,12 @@ export class WindowHelper {
     this.isWindowVisible = launcherVisible || overlayVisible
   }
 
+  private syncVisibilityState(): void {
+    const launcherVisible = !!(this.launcherWindow && !this.launcherWindow.isDestroyed() && this.launcherWindow.isVisible())
+    const overlayVisible = !!(this.overlayWindow && !this.overlayWindow.isDestroyed() && this.overlayWindow.isVisible())
+    this.isWindowVisible = launcherVisible || overlayVisible
+  }
+
   private applyContentProtectionToWindow(win: BrowserWindow | null): void {
     if (!win || win.isDestroyed()) return
 
@@ -82,6 +88,28 @@ export class WindowHelper {
 
     // Re-assert z-order because some fullscreen transitions can demote the window.
     this.overlayWindow.moveTop()
+  }
+
+  private revealOverlayWindow(): void {
+    if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return
+
+    this.applyContentProtectionToWindow(this.overlayWindow)
+    this.ensureOverlayAlwaysOnTop()
+
+    if (process.platform === "darwin") {
+      app.focus({ steal: true })
+    }
+
+    this.overlayWindow.show()
+    this.overlayWindow.moveTop()
+    this.overlayWindow.focus()
+
+    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      this.launcherWindow.hide()
+    }
+
+    this.currentWindowMode = 'overlay'
+    this.syncVisibilityState()
   }
 
   private revealOverlayWindow(): void {
@@ -304,6 +332,11 @@ export class WindowHelper {
 
     this.launcherWindow.on("hide", () => {
       this.syncVisibilityState()
+      this.syncVisibilityState()
+    })
+
+    this.launcherWindow.on("hide", () => {
+      this.syncVisibilityState()
     })
 
     this.launcherWindow.on("closed", () => {
@@ -321,6 +354,11 @@ export class WindowHelper {
       this.overlayWindow.on("show", () => {
         this.applyContentProtectionToWindow(this.overlayWindow)
         this.ensureOverlayAlwaysOnTop()
+        this.syncVisibilityState()
+      })
+
+      this.overlayWindow.on("hide", () => {
+        this.syncVisibilityState()
         this.syncVisibilityState()
       })
 
@@ -415,6 +453,7 @@ export class WindowHelper {
     this.currentWindowMode = 'overlay';
 
     // Reset overlay position to center before reveal.
+    // Reset overlay position to center before reveal.
     if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
       const primaryDisplay = screen.getPrimaryDisplay()
       const workArea = primaryDisplay.workAreaSize
@@ -426,46 +465,49 @@ export class WindowHelper {
     this.revealOverlayWindow()
   }
 
+    this.revealOverlayWindow()
+  }
+
   public switchToLauncher(): void {
-    console.log('[WindowHelper] Switching to LAUNCHER');
-    this.currentWindowMode = 'launcher';
+  console.log('[WindowHelper] Switching to LAUNCHER');
+  this.currentWindowMode = 'launcher';
 
-    // Show Launcher FIRST
-    if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-      this.applyContentProtectionToWindow(this.launcherWindow);
-      this.launcherWindow.show();
-      this.applyContentProtectionToWindow(this.launcherWindow);
-      this.launcherWindow.focus();
-      this.isWindowVisible = true;
+  // Show Launcher FIRST
+  if(this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+  this.applyContentProtectionToWindow(this.launcherWindow);
+  this.launcherWindow.show();
+  this.applyContentProtectionToWindow(this.launcherWindow);
+  this.launcherWindow.focus();
+  this.isWindowVisible = true;
 
-    }
+}
 
-    // Hide Overlay SECOND
-    if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-      this.overlayWindow.hide();
-    }
+// Hide Overlay SECOND
+if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
+  this.overlayWindow.hide();
+}
   }
 
   // Simplified setWindowMode that just calls switchers
   public setWindowMode(mode: 'launcher' | 'overlay'): void {
-    if (mode === 'launcher') {
-      this.switchToLauncher();
-    } else {
-      this.switchToOverlay();
-    }
+  if(mode === 'launcher') {
+  this.switchToLauncher();
+} else {
+  this.switchToOverlay();
+}
   }
 
   // --- Window Movement (Applies to Overlay mostly, but generalized to active) ---
   private moveActiveWindow(dx: number, dy: number): void {
-    const win = this.getMainWindow();
-    if (!win) return;
+  const win = this.getMainWindow();
+  if(!win) return;
 
-    const [x, y] = win.getPosition();
-    win.setPosition(x + dx, y + dy);
+  const [x, y] = win.getPosition();
+  win.setPosition(x + dx, y + dy);
 
-    this.currentX = x + dx;
-    this.currentY = y + dy;
-  }
+  this.currentX = x + dx;
+  this.currentY = y + dy;
+}
 
   public moveWindowRight(): void { this.moveActiveWindow(this.step, 0) }
   public moveWindowLeft(): void { this.moveActiveWindow(-this.step, 0) }
